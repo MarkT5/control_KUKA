@@ -4,8 +4,8 @@ import time
 import cv2
 import numpy as np
 
-from Objects import *
-from Screen import Screen
+from Pygame_GUI.Objects import *
+from Pygame_GUI.Screen import Screen
 
 deb = True
 

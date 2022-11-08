@@ -1,5 +1,5 @@
 from KUKA import KUKA
-from GUI_pygame import GuiControl
+from Pygame_GUI.GUI_pygame import GuiControl
 from map_plotter import MapPlotter
 import threading as thr
 
