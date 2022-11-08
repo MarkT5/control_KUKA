@@ -25,6 +25,7 @@ class GuiControl:
         self.wall_lines = []
         self.pause = False
         self.space_clk = False
+        self.step = True
 
         f = open(inp_file_name, "r")
         txt_log_data = f.read().split('\n')
@@ -81,40 +82,32 @@ class GuiControl:
         """
         self.init_pygame()
         while self.screen.running:
-            self.body_pos_screen = np.copy(self.body_pos_background)
             self.update_keys()
-            self.update_body_pos()
-            self.update_lidar()
+            if self.step:
+                self.step = False
+                self.body_pos_screen = np.copy(self.body_pos_background)
+                self.update_body_pos()
+                self.update_lidar()
+
+                self.odom, self.lidar = self.log_data[self.log_data_ind]
+                if not self.pause and self.log_data_ind + 1 < len(self.log_data):
+                    self.log_data_ind += 1
+                    self.step = True
+
+                self.m1_slider.set_val(self.log_data_ind)
+
+                object_coords = split_objects(self.log_data[self.log_data_ind])
+                for object in object_coords:
+                    approx_points, _ = douglas_peucker(object)
+                    connection_coords = [[object[p][0], object[p][1]] for p in approx_points]
+                    self.draw_wall_line(connection_coords)
 
 
-            self.odom, self.lidar = self.log_data[self.log_data_ind]
-            if not self.pause and self.log_data_ind + 1 < len(self.log_data):
-                self.log_data_ind += 1
 
-            self.m1_slider.set_val(self.log_data_ind)
-
-            object_coords = split_objects(self.log_data[self.log_data_ind])
-            for object in object_coords:
-                approx_points, _ = douglas_peucker(object)
-                connection_coords = [[object[p][0], object[p][1]] for p in approx_points]
-                self.draw_wall_line(connection_coords)
-
-                corners = find_corners(connection_coords)
-                if corners:
-                    for i in corners:
-                        ind = check_existing_corners(i)
-                        print(ind)
-                        if ind!=None:
-                            color = (0, 255, 0)
-                        else:
-                            color = (255, 0, 0)
-                        cv2.circle(self.body_pos_screen,
-                           (self.width // 2 - int(i[1] * self.line_scale), self.width // 2 - int(i[0] * self.line_scale)),
-                           max(1, int(0.08 * self.move_body_scale)), color, -1)
+                    check_existing_corners(object)
 
 
             self.screen.step()
-            self.wall_lines = []
             self.clock.tick(10)
 
     def update_keys(self):
@@ -123,7 +116,6 @@ class GuiControl:
         :return:
         """
         pressed_keys = self.screen.pressed_keys
-        print(pressed_keys)
         if pg.K_SPACE in pressed_keys:
             if self.space_clk:
                 self.pause = not self.pause
@@ -132,9 +124,10 @@ class GuiControl:
             self.space_clk = True
         if pg.K_LEFT in pressed_keys:
             self.log_data_ind -= 1
-            print()
+            self.step = True
         if pg.K_RIGHT in pressed_keys:
             self.log_data_ind += 1
+            self.step = True
 
 
     def draw_wall_line(self, connection_coords, color=(255, 255, 255)):
@@ -217,5 +210,5 @@ class GuiControl:
 
 
 
-sim = GuiControl(700, "../lidar_odom_log/lidar_odom_log_8.txt")
+sim = GuiControl(700, "../lidar_odom_log/lidar_odom_log_9.txt")
 sim.run()

@@ -18,7 +18,7 @@ class MapPlotter:
         self.cent_y = map_size // 2
         self.discrete = 20
         if log_data:
-            self.log_file = open("lidar_odom_log_8.txt", "a")
+            self.log_file = open("lidar_odom_log/lidar_odom_log_9.txt", "a")
 
     def scale_to_arr(self, x, y):
         return (int(self.map_size / 2 + self.discrete * x), int(self.map_size / 2 - self.discrete * y))
@@ -31,7 +31,7 @@ class MapPlotter:
                 continue
             x, y, ang = pos
             time += 1
-            if time < 100:
+            if time < 500:
                 continue
             else:
                 time = 0

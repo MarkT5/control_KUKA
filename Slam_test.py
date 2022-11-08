@@ -4,6 +4,7 @@ import cv2
 import matplotlib.pyplot as pyplot
 import numpy as np
 import scipy
+import scipy.spatial
 
 
 def open_log():
@@ -78,18 +79,24 @@ def conv_cil_to_dec(input, ind=None):
     return out_points
 
 
-def best_fit_transform(A, B):
+def best_fit_transform(A, B, cornerA_ind, cornerB_ind):
     # assert A.shape == B.shape
 
     # get number of dimensions
-    m = A.shape[1]
-
+    n, m = A.shape
     # translate points to their centroids
-    centroid_A = np.mean(A, axis=0)
-    centroid_B = np.mean(B, axis=0)
+    weights = np.concatenate((np.array(range(0, cornerA_ind))**4, np.array(range(n, cornerA_ind, -1))**4))
+    print(cornerA_ind)
+    weights_sum = np.sum(weights)
+    weights = np.diag(weights)
+    centroid_A = np.sum(np.dot(weights, A), axis=0) / weights_sum
+    centroid_B = np.sum(np.dot(weights, B), axis=0) / weights_sum
+    #print(centroid_A, "new")
+    #centroid_A = np.mean(A, axis=0)
+    #centroid_B = np.mean(B, axis=0)
+    #print(centroid_A, "old")
     AA = A - centroid_A
     BB = B - centroid_B
-
     # rotation matrix
     H = np.dot(AA.T, BB)
     U, S, Vt = np.linalg.svd(H)
@@ -119,12 +126,14 @@ def nearest_neighbor(src, dst):
     return dist.ravel(), indexes.ravel()
 
 
-def icp(A, B, init_pose=None, max_iterations=1000, tolerance=0.0000001):
+def icp(A, B, cornerA_ind, cornerB_ind, init_pose=None, max_iterations=20, tolerance=0.01):
     print(A.shape, B.shape)
     # assert A.shape == B.shape
-
+    cornerA = A[cornerA_ind]
+    cornerB = B[cornerB_ind]
     # get number of dimensions
     m = A.shape[1]
+
 
     # make points homogeneous, copy them to maintain the originals
     src = np.ones((m + 1, A.shape[0]))
@@ -145,7 +154,7 @@ def icp(A, B, init_pose=None, max_iterations=1000, tolerance=0.0000001):
         distances, indices = nearest_neighbor(src[:m, :].T, dst[:m, :].T)
 
         # compute the transformation between the current source and nearest destination points
-        T, _, _ = best_fit_transform(src[:m, :].T, dst[:m, indices].T)
+        T, _, _ = best_fit_transform(src[:m, :].T, dst[:m, indices].T, cornerA_ind, cornerB_ind)
 
         # update the current source
         src = np.dot(T, src)
@@ -154,19 +163,13 @@ def icp(A, B, init_pose=None, max_iterations=1000, tolerance=0.0000001):
         mean_error = np.mean(distances)
         if np.abs(prev_error - mean_error) < tolerance:
             error = np.abs(prev_error - mean_error)
+            print('smol')
             break
+
         prev_error = mean_error
-        if i // 3 == 0:
-            # display
-            converted = np.dot(T, src)
-
-            # back from homogeneous to cartesian
-            converted = np.array(converted[:converted.shape[1], :]).T
-
-            # pyplot.plot([p[0] for p in converted], [p[1] for p in converted], 'o', label='converted iter {}'.format(i))
 
     # calculate final transformation
-    T, _, _ = best_fit_transform(A, src[:m, :].T)
+    T, _, _ = best_fit_transform(A, src[:m, :].T, cornerA_ind, cornerB_ind)
 
     return T, distances, i, error
 
@@ -363,13 +366,15 @@ def find_corners_from_hough(object):
     except:
         return None
 
-def find_corners(connection_coords):
+def find_corners(object, approx_points_ind):
+    connection_coords = [[object[p][0], object[p][1]] for p in approx_points_ind]
     if not connection_coords:
         return None
     a_prev = None
-    offset = 7
+    offset = 0.1
     corner = []
     for i in range(1, len(connection_coords)):
+
         x1, y1 = connection_coords[i-1]
         x2, y2 = connection_coords[i]
         a_curr = 0
@@ -380,23 +385,48 @@ def find_corners(connection_coords):
             a_curr = (y1 - y2) / (x1 - x2)
         if a_prev:
             pass
-            #print(a_curr, a_prev, -1/a_prev)
-        if a_prev and abs(a_curr+1/a_prev) < offset:
-            corner.append(connection_coords[i-1])
+        if a_prev and abs(math.atan(a_curr)+math.atan(1/a_prev)) < offset:
+            corner.append([connection_coords[i-1], approx_points_ind[i-1]])
         a_prev = a_curr
     if corner:
         return corner
     else:
         return None
 
-def check_existing_corners(corner):
-    offset = 20
-    for i in range(len(all_detected_corners)):
-        xof = (corner[0]-all_detected_corners[i][0])**2
-        yof = (corner[1]-all_detected_corners[i][1])**2
-        if offset > xof+yof:
-            return i
-    all_detected_corners.append(corner)
+def check_existing_corners(object):
+    object = np.array(object)
+    approx_points_ind, _ = douglas_peucker(object)
+    corners = find_corners(object, approx_points_ind)
+    if not corners:
+        return None
+    max_offset = 40
+    min_offset = 10
+    for c in range(len(corners)):
+        corner = corners[c][0]
+        corner_rel_ind = corners[c][1]
+        for i in range(len(all_detected_corners)):
+            xof = (corner[0]-all_detected_corners[i][0][0])**2
+            yof = (corner[1]-all_detected_corners[i][0][1])**2
+            if max_offset > xof+yof > min_offset:
+                #icp here
+                icp_out = icp(object, all_detected_corners[i][1], corner_rel_ind, all_detected_corners[i][2])
+                if True:
+                    pyplot.plot([p[0] for p in all_detected_corners[i][1]], [p[1] for p in all_detected_corners[i][1]], '.', label='points 1')
+                    pyplot.plot([p[0] for p in object], [p[1] for p in object], 'o', label='points 2')
+                    # to homogeneous
+                    converted = np.ones((object.shape[1] + 1, object.shape[0]))
+                    converted[:object.shape[1], :] = np.copy(object.T)
+                    # transform
+                    converted = np.dot(icp_out[0], converted)
+                    # back from homogeneous to cartesian
+                    converted = np.array(converted[:converted.shape[1], :]).T
+                    pyplot.plot([p[0] for p in converted], [p[1] for p in converted], 'o', label='converted')
+                    pyplot.axis('equal')
+                    pyplot.legend(numpoints=1)
+                    pyplot.show()
+
+                return i
+        all_detected_corners.append([corner, np.array(object), corner_rel_ind])
     return None
 
 def draw_line(a, b, name="line"):
