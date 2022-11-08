@@ -374,11 +374,13 @@ def find_corners(connection_coords):
         x2, y2 = connection_coords[i]
         a_curr = 0
         if x1 == x2 or y1 == y2:
-            print("vert")
+            #print("vert")
+            pass
         else:
             a_curr = (y1 - y2) / (x1 - x2)
         if a_prev:
-            print(a_curr, a_prev, -1/a_prev)
+            pass
+            #print(a_curr, a_prev, -1/a_prev)
         if a_prev and abs(a_curr+1/a_prev) < offset:
             corner.append(connection_coords[i-1])
         a_prev = a_curr

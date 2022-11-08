@@ -24,6 +24,7 @@ class GuiControl:
         self.line_scale = self.move_body_scale / discrete
         self.wall_lines = []
         self.pause = False
+        self.space_clk = False
 
         f = open(inp_file_name, "r")
         txt_log_data = f.read().split('\n')
@@ -89,7 +90,8 @@ class GuiControl:
             self.odom, self.lidar = self.log_data[self.log_data_ind]
             if not self.pause and self.log_data_ind + 1 < len(self.log_data):
                 self.log_data_ind += 1
-                self.m1_slider.set_val(self.log_data_ind)
+
+            self.m1_slider.set_val(self.log_data_ind)
 
             object_coords = split_objects(self.log_data[self.log_data_ind])
             for object in object_coords:
@@ -121,8 +123,19 @@ class GuiControl:
         :return:
         """
         pressed_keys = self.screen.pressed_keys
+        print(pressed_keys)
         if pg.K_SPACE in pressed_keys:
-            self.pause = not self.pause
+            if self.space_clk:
+                self.pause = not self.pause
+                self.space_clk = False
+        elif pg.K_SPACE not in pressed_keys:
+            self.space_clk = True
+        if pg.K_LEFT in pressed_keys:
+            self.log_data_ind -= 1
+            print()
+        if pg.K_RIGHT in pressed_keys:
+            self.log_data_ind += 1
+
 
     def draw_wall_line(self, connection_coords, color=(255, 255, 255)):
         connection_coords = [
