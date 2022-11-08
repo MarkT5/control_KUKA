@@ -1,0 +1,8 @@
+ssh youbot@192.168.88.25
+sudo -s
+1122334455
+cd home/youbot/catkin_ws/devel
+source setup.bash
+rospack profile
+
+roslaunch youbot_tl_test ytl.launch
