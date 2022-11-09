@@ -102,9 +102,8 @@ class GuiControl:
                     connection_coords = [[object[p][0], object[p][1]] for p in approx_points]
                     self.draw_wall_line(connection_coords)
 
-
-
-                    check_existing_corners(object)
+                    check_existing_corners_by_lines(object)
+                    #check_existing_corners(object)
 
 
             self.screen.step()
