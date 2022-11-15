@@ -6,3 +6,11 @@ source setup.bash
 rospack profile
 
 roslaunch youbot_tl_test ytl.launch
+
+
+
+
+xacro: Traditional processing is deprecated. Switch to --inorder processing!
+To check for compatibility of your document, use option --check-order.
+For more infos, see http://wiki.ros.org/xacro#Processing_Order
+xacro.py is deprecated; please use xacro instead

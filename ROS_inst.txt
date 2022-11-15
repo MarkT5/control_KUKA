@@ -1,0 +1,36 @@
+sudo apt-get update
+sudo apt-get upgrade
+sudo sh -c 'echo "deb http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros-latest.list'
+sudo apt install curl
+curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo apt-key add -
+sudo apt-get update
+sudo apt-get install ros-kinetic-ros-base
+echo "source /opt/ros/kinetic/setup.bash" >> ~/.bashrc source ~/.bashrc
+sudo apt install python-rosdep python-rosinstall python-rosinstall-generator python-wstool build-essential
+sudo apt install python-rosdep
+sudo rosdep init
+rosdep update
+
+mkdir -p ~/catkin_ws/src
+cd ~/catkin_ws/src
+git clone https://github.com/youbot/youbot_driver_ros_interface.git
+
+sudo apt install ros-kinetic-driver-base
+sudo apt install ros-kinetic-youbot-driver
+
+sudo apt install ros-kinetic-brics-actuator
+sudo apt install ros-kinetic-control-msgs
+sudo apt install ros-kinetic-pr2-msgs
+sudo apt install ros-kinetic-tf
+
+sudo apt install ros-kinetic-youbot-description
+sudo apt install ros-kinetic-cv-bridge
+sudo apt install ros-kinetic-openni*
+sudo apt install ros-kinetic-web-video-server
+
+cd ~/catkin_ws
+catkin_make
+scp -r "/home/ubuntu/ZaSKaR/youbot_tl_test" "root@192.168.88.25:/home/youbot/catkin_ws/src/youbot_tl_test/"
+scp -r "/home/ubuntu/ZaSKaR/hokuyo_node" "root@192.168.88.25:/home/youbot/catkin_ws/src/hokuyo_node"
+catkin_make
+roslaunch youbot_tl_test ytl.launch
