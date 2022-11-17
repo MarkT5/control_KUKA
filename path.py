@@ -116,8 +116,7 @@ class RRT_sim():
 
             if self.rrt.dist_reached:
                 self.rrt.get_path()
-                print([[*i] for i in self.rrt.path])
-                pg.draw.aaline(self.screen, (255, 0, 255), False, [[*i] for i in self.rrt.path])
+                pg.draw.lines(self.screen, (255, 0, 0), False, [[*i] for i in self.rrt.path], 5)
 
             # out pygame
             pg.display.update()
