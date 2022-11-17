@@ -1,9 +1,8 @@
 import numpy as np
-a = np.array([[1,2],[3,4],[5,6],[7,8]])
-w = [1,2,3,4]
-c = np.sum(a, axis=1)
-print(c)
-d = np.where(a==[5,6])[0][0]
-b = np.diag(w)/c
-print(d)
-print(np.dot(b,a))
+point1 = np.around([1.9,2,3,4]).astype(np.int64)
+point2 = np.array([2,6,4,3])
+print(point1)
+shift_vector = point1-point2
+shift_vector = shift_vector/sum(abs(shift_vector))
+
+print(shift_vector)
