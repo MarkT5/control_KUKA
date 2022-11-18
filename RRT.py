@@ -1,6 +1,7 @@
 import numpy as np
 import scipy
 import scipy.spatial
+import cv2
 
 
 class RRT:
@@ -26,6 +27,7 @@ class RRT:
         self.e = 5
         self.end_dist = 100
         self.rrt_star_rad = 30
+        self.robot_radius = 60
 
     def start(self):
         if not self.start_point.any():
@@ -34,6 +36,21 @@ class RRT:
         if not self.end_point.any():
             print("No end point")
         assert self.end_point.any()
+
+
+        # border big
+        n_mask = scipy.ndimage.generate_binary_structure(2, 1)
+        neighborhood = np.zeros((self.robot_radius, self.robot_radius))
+        neighborhood[self.robot_radius//2][self.robot_radius//2] = 1
+        neighborhood = scipy.ndimage.binary_dilation(neighborhood, structure=n_mask).astype(n_mask.dtype)
+        for i in range(int(self.robot_radius//2 / 3)):
+            neighborhood = scipy.ndimage.binary_dilation(neighborhood, structure=neighborhood).astype(n_mask.dtype)
+        self.bool_map = self.bool_map==0
+        self.bool_map = scipy.ndimage.binary_erosion(self.bool_map, structure=neighborhood, border_value=1)
+        self.bool_map = self.bool_map == False
+
+
+
         self.nodes = np.array([self.start_point]).astype(np.uint32)
         self.node_map = np.zeros(self.bool_map.shape).astype(np.uint16)
         self.graph[0] = [None, [], 0]
@@ -68,10 +85,9 @@ class RRT:
     def step(self):
         node = self.nodes[self.node_num - 1]
         dist = np.linalg.norm(node - self.end_point)
-        self.force_random = 1
         if self.force_random:
             self.add_random()
-            #self.force_random -= 1
+            self.force_random -= 1
         elif dist < self.end_dist and self.force_random == 0:
             self.add_near_end()
             if self.stuck > 10:

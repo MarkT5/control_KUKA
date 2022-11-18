@@ -155,12 +155,13 @@ class GuiControl:
         initialises PyGame, updates all data, check pressed keys, updates screen
         :return:
         """
-        self.init_pygame()
+        #self.init_pygame()
         while self.screen.running:
-            if not self.economy_mode:
-                self.update_arm(self.cylindrical_scale)
-            self.update_keys()
-            self.screen.step()
+            pass
+        #    if not self.economy_mode:
+        #        self.update_arm(self.cylindrical_scale)
+        #    self.update_keys()
+        #    self.screen.step()
         self.robot.disconnect()
 
     def change_m1_angle(self, val):

@@ -4,8 +4,10 @@ import cv2
 from RRT import RRT
 
 
-class RRT_sim():
-    def __init__(self):
+class RRT_sim:
+    def __init__(self, curr_pos=None, plotter = None):
+        self.start_point = curr_pos
+        self.plotter = plotter
         self.map_height = 900
         self.map_width = 600
         self.disp_scale = 1
@@ -29,10 +31,10 @@ class RRT_sim():
         cv2.rectangle(self.map_arr, (0, 0), (self.map_height, self.map_width), (0, 0, 0), 1)
         cv2.fillPoly(self.map_arr, pts=[obstacle1_conv, obstacle2_conv, obstacle3_conv], color=(0, 0, 0))
 
-
+        self.tree_stage = False
         self.step = False
         self.flow = False
-        self.start_point = None
+
         self.end_point = None
         nav_map = []
         for i in self.map_arr:
@@ -66,6 +68,8 @@ class RRT_sim():
                     self.step = True
                 elif event.key == pg.K_a:
                     self.flow = False
+                elif event.key == pg.K_SPACE:
+                    self.tree_stage = True
             elif event.type == pg.MOUSEBUTTONDOWN:
                 if not self.start_point:
                     self.start_point = self.screen_to_arr(pg.mouse.get_pos())
@@ -91,13 +95,15 @@ class RRT_sim():
             pg.display.update()
             pg.display.flip()
             self.clock.tick(10)
-            if self.end_point:
+            if self.end_point and self.tree_stage:
                 self.step_rrt()
         pg.quit()
 
     def step_rrt(self):
         self.rrt.start_point = np.array(self.start_point)
         self.rrt.end_point = np.array(self.end_point)
+        if self.plotter:
+            self.rrt.bool_map = self.plotter.map_arr
         self.rrt.bool_map = np.array(self.nav_map).astype(np.uint8)
         self.rrt.start()
         self.rrt.step()
@@ -129,5 +135,5 @@ class RRT_sim():
         pg.quit()
 
 
-rrt_sim = RRT_sim()
-rrt_sim.start()
+#rrt_sim = RRT_sim()
+#rrt_sim.start()

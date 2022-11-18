@@ -12,7 +12,7 @@ class MapPlotter:
         self.map_size = map_size
         self.bg = np.array([[[190, 70, 20]] * width] * width, dtype=np.uint8)
         self.map_background = np.array([[[100, 100, 100]] * map_size] * map_size, dtype=np.uint8)
-        self.map_arr = np.array([[0] * self.map_size] * self.map_size)
+        self.map_arr = np.array([[1] * self.map_size] * self.map_size)
         self.width = width
         self.cent_x = map_size // 2
         self.cent_y = map_size // 2
