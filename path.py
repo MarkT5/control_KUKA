@@ -111,8 +111,9 @@ class RRT_sim():
                 i = self.rrt.nodes[j]
                 pg.draw.circle(self.screen, (0, 0, 255), list(map(lambda x: x * self.disp_scale, i)), 5)
             pg.draw.circle(self.screen, (255, 0, 0), list(map(lambda x: x * self.disp_scale, self.start_point)), 5)
-            for i in self.rrt.edges:
-                pg.draw.aaline(self.screen, (255, 0, 255), list(map(lambda x: x * self.disp_scale, self.rrt.nodes[i[0]])), list(map(lambda x: x * self.disp_scale, self.rrt.nodes[i[1]])))
+            for i in range(1, self.rrt.node_num):
+                n = self.rrt.graph[i][0]
+                pg.draw.aaline(self.screen, (255, 0, 255), list(map(lambda x: x * self.disp_scale, self.rrt.nodes[i])), list(map(lambda x: x * self.disp_scale, self.rrt.nodes[n])))
             pg.draw.circle(self.screen, (255, 0, 255), list(map(lambda x: x * self.disp_scale, self.rrt.random_point)),
                            5)
             if self.rrt.dist_reached:

@@ -13,9 +13,7 @@ class RRT:
         self.bool_map = None
         self.map_height = None
         self.map_width = None
-        self.edges = []
         self.node_num = 0
-        self.edge_num = 0
         self.stuck = 0
         self.force_random = 0
         self.dist_reached = False
@@ -53,7 +51,9 @@ class RRT:
         shift_vector = shift_vector / iters
         all_shift = shift_vector
         c_point = np.array(False)
+        iters_made = 0
         for i in range(1, iters + 1):
+            iters_made = i
             all_shift = np.copy(shift_vector * i)
             c_point = np.around(point1 + shift_vector * i).astype(np.int64)
             if self.bool_map[tuple(c_point)]:
@@ -62,8 +62,8 @@ class RRT:
             if np.linalg.norm(shift_vector * i) >= self.growth_factor:
                 break
         if np.linalg.norm(all_shift) < self.e or not c_point.any():
-            return np.array(False), None
-        return c_point, np.linalg.norm(all_shift)
+            return np.array(False), None, None
+        return c_point, np.linalg.norm(all_shift), iters_made==iters
 
     def step(self):
         node = self.nodes[self.node_num - 1]
@@ -107,18 +107,22 @@ class RRT:
         return self.node_neighbours
 ############################################################
 
-
-
+    def find_best_connection(self, new_node, neighbours):
+        neighbours = [[i, self.nodes[i], *self.graph[i]] for i in neighbours]
+        neighbours.sort(key=lambda x: x[-1])
+        for i in neighbours:
+            _, dist, reached = self.check_obstacle(new_node, i[2])
+            if reached:
+                print(i)
+                break
     def add_node_to_closest(self, new_node):
-
         closest_node = self.find_closest(new_node)
-        node, dist = self.check_obstacle(self.nodes[closest_node[1]], new_node)
+        node, dist, _ = self.check_obstacle(self.nodes[closest_node[1]], new_node)
         if node.any():
             neighbors = self.check_node_region(new_node)
-            print(neighbors)
-            self.edges.append([self.node_num, closest_node[1]])
+            if neighbors:
+                self.find_best_connection(node, neighbors)
             self.nodes = np.append(self.nodes, [node], axis=0).astype(np.uint32)
-            self.edge_num += 1
             self.graph[self.node_num] = [closest_node[1], [], dist+self.graph[closest_node[1]][2]]
             self.node_map[tuple(node)] = self.node_num
             self.graph[closest_node[1]][1].append(self.node_num)
