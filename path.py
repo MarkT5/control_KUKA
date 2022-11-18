@@ -98,7 +98,7 @@ class RRT_sim():
     def step_rrt(self):
         self.rrt.start_point = np.array(self.start_point)
         self.rrt.end_point = np.array(self.end_point)
-        self.rrt.bool_map = np.array(self.nav_map)
+        self.rrt.bool_map = np.array(self.nav_map).astype(np.uint8)
         self.rrt.start()
         self.rrt.step()
         print("start RRT")
@@ -107,16 +107,16 @@ class RRT_sim():
             self.draw_map()
             if self.step and not self.rrt.dist_reached:
                 self.rrt.step()
-            for i in self.rrt.nodes:
+            for j in range(self.rrt.nodes.shape[0]):
+                i = self.rrt.nodes[j]
                 pg.draw.circle(self.screen, (0, 0, 255), list(map(lambda x: x * self.disp_scale, i)), 5)
-            pg.draw.circle(self.screen, (255, 0, 255), list(map(lambda x: x * self.disp_scale, self.rrt.random_point)), 5)
             pg.draw.circle(self.screen, (255, 0, 0), list(map(lambda x: x * self.disp_scale, self.start_point)), 5)
             for i in self.rrt.edges:
                 pg.draw.aaline(self.screen, (255, 0, 255), list(map(lambda x: x * self.disp_scale, self.rrt.nodes[i[0]])), list(map(lambda x: x * self.disp_scale, self.rrt.nodes[i[1]])))
 
             if self.rrt.dist_reached:
                 self.rrt.get_path()
-                pg.draw.lines(self.screen, (255, 0, 0), False, [[*i] for i in self.rrt.path], 5)
+                pg.draw.lines(self.screen, (255, 0, 0), False, [[*i] for i in list(map(lambda x: x * self.disp_scale, self.rrt.path))], 5)
 
             # out pygame
             pg.display.update()
