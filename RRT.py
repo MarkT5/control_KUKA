@@ -12,8 +12,6 @@ class RRT:
         self.node_map = None
         self.graph = {}
         self.bool_map = None
-        self.map_height = None
-        self.map_width = None
         self.node_num = 0
         self.stuck = 0
         self.force_random = 0
@@ -23,11 +21,11 @@ class RRT:
         self.graph_printed = False
 
         # settings
-        self.growth_factor = 100
-        self.e = 5
+        self.growth_factor = 150
+        self.e = 2
         self.end_dist = 100
-        self.rrt_star_rad = 30
-        self.robot_radius = 60
+        self.rrt_star_rad = 300
+        self.robot_radius = 30
 
     def start(self):
         if not self.start_point.any():
@@ -37,29 +35,18 @@ class RRT:
             print("No end point")
         assert self.end_point.any()
 
-
-        # border big
-        n_mask = scipy.ndimage.generate_binary_structure(2, 1)
-        neighborhood = np.zeros((self.robot_radius, self.robot_radius))
-        neighborhood[self.robot_radius//2][self.robot_radius//2] = 1
-        neighborhood = scipy.ndimage.binary_dilation(neighborhood, structure=n_mask).astype(n_mask.dtype)
-        for i in range(int(self.robot_radius//2 / 3)):
-            neighborhood = scipy.ndimage.binary_dilation(neighborhood, structure=neighborhood).astype(n_mask.dtype)
-        self.bool_map = self.bool_map==0
-        self.bool_map = scipy.ndimage.binary_erosion(self.bool_map, structure=neighborhood, border_value=1)
-        self.bool_map = self.bool_map == False
-
-
-
         self.nodes = np.array([self.start_point]).astype(np.uint32)
-        self.node_map = np.zeros(self.bool_map.shape).astype(np.uint16)
+        self.node_map = np.ones(self.bool_map.shape).astype(np.int16)*-1
+        self.node_map[tuple(self.start_point)] = 0
         self.graph[0] = [None, [], 0]
         self.node_num = 1
         map_shape = self.bool_map.shape
         self.map_shape = (map_shape - np.ones(len(map_shape))).astype(np.uint32)
 
-    def find_closest(self, point):
-        nodes_tree = scipy.spatial.cKDTree(self.nodes)
+    def find_closest(self, point, node_arr=np.array(False)):
+        if not node_arr.any():
+            node_arr = self.nodes
+        nodes_tree = scipy.spatial.cKDTree(node_arr)
         return nodes_tree.query(point)
 
     def check_obstacle(self, point1, point2):
@@ -90,6 +77,7 @@ class RRT:
             self.force_random -= 1
         elif dist < self.end_dist and self.force_random == 0:
             self.add_near_end()
+            self.force_random = 50
             if self.stuck > 10:
                 self.stuck = 0
                 self.force_random = 50
@@ -112,37 +100,64 @@ class RRT:
                 self.iter_node_map(node, curr_dim, pos)
         else:
             for i in range(mi, ma):
-                if self.node_map[(*pos, i)] != 0:
+                if self.node_map[(*pos, i)] != -1:
                     self.node_neighbours.append(self.node_map[(*pos, i)])
 
     def check_node_region(self, new_node):
-        self.node_neighbours = []
-        curr_dim = 0
-        pos = [0]*(new_node.shape[0]-1)
-        self.iter_node_map(new_node, curr_dim, pos)
-        return self.node_neighbours
+        node_neighbours = []
+        nodes_copy = np.copy(self.nodes)
+        for i in range(100):
+            closest_node = self.find_closest(new_node, nodes_copy)
+            nodes_copy[closest_node[1]] = np.ones(new_node.shape)*-1
+            if closest_node[0] < self.rrt_star_rad:
+                node_neighbours.append(closest_node[1])
+            else:
+                break
+
+
+        #self.node_neighbours = []
+        #curr_dim = 0
+        #pos = [0]*(new_node.shape[0]-1)
+        #self.iter_node_map(new_node, curr_dim, pos)
+        return node_neighbours
 ############################################################
 
     def find_best_connection(self, new_node, neighbours):
         neighbours = [[i, self.nodes[i], *self.graph[i]] for i in neighbours]
         neighbours.sort(key=lambda x: x[-1])
+        have_parent = False
         for i in neighbours:
-            _, dist, reached = self.check_obstacle(new_node, i[2])
+            _, dist, reached = self.check_obstacle(new_node, i[1])
             if reached:
-                print(i)
-                break
+                if not have_parent:
+                    self.nodes = np.append(self.nodes, [new_node], axis=0).astype(np.uint32)
+                    self.graph[self.node_num] = [i[0], [], dist + self.graph[i[0]][2]]
+                    self.node_map[tuple(new_node)] = self.node_num
+                    self.graph[i[0]][1].append(self.node_num)
+                    self.node_map[tuple(new_node)] = self.node_num
+                    self.node_num += 1
+                    have_parent = True
+                else:
+                    if dist + self.graph[self.node_num-1][2] < self.graph[i[0]][2]: #and self.graph[i[0]][0] != i[2]:
+                        if i[0] in self.graph[i[2]][1]:
+                            self.graph[i[0]][0] = self.node_num-1
+                            self.graph[i[2]][1].remove(i[0])
+                            self.graph[self.node_num - 1][1].append(i[0])
+                            self.rebalance(i[0], self.graph[i[0]][2] - dist - self.graph[self.node_num-1][2])
+
+
+    def rebalance(self, node_num, delta):
+        self.graph[node_num][2] -= delta
+        for i in self.graph[node_num][1]:
+            self.rebalance(i, delta)
+
+
     def add_node_to_closest(self, new_node):
         closest_node = self.find_closest(new_node)
         node, dist, _ = self.check_obstacle(self.nodes[closest_node[1]], new_node)
         if node.any():
-            neighbors = self.check_node_region(new_node)
-            if neighbors:
-                self.find_best_connection(node, neighbors)
-            self.nodes = np.append(self.nodes, [node], axis=0).astype(np.uint32)
-            self.graph[self.node_num] = [closest_node[1], [], dist+self.graph[closest_node[1]][2]]
-            self.node_map[tuple(node)] = self.node_num
-            self.graph[closest_node[1]][1].append(self.node_num)
-            self.node_num += 1
+            neighbors = self.check_node_region(node)
+            self.find_best_connection(node, neighbors)
             return node
         else:
             return np.array(False)
@@ -171,6 +186,4 @@ class RRT:
             node_num = self.graph[node_num][0]
         self.path.append(self.nodes[node_num])
         if not self.graph_printed:
-            print(self.graph)
             self.graph_printed = True
-            print(self.node_map)

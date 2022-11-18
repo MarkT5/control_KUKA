@@ -2,6 +2,7 @@ import pygame as pg
 import numpy as np
 import cv2
 from RRT import RRT
+import scipy
 
 
 class RRT_sim:
@@ -12,6 +13,7 @@ class RRT_sim:
         self.map_width = 600
         self.disp_scale = 1
         self.discrete = 0.5
+        self.robot_radius = 30
 
 
         pg.init()
@@ -68,8 +70,6 @@ class RRT_sim:
                     self.step = True
                 elif event.key == pg.K_a:
                     self.flow = False
-                elif event.key == pg.K_SPACE:
-                    self.tree_stage = True
             elif event.type == pg.MOUSEBUTTONDOWN:
                 if not self.start_point:
                     self.start_point = self.screen_to_arr(pg.mouse.get_pos())
@@ -95,29 +95,38 @@ class RRT_sim:
             pg.display.update()
             pg.display.flip()
             self.clock.tick(10)
-            if self.end_point and self.tree_stage:
+            if self.end_point:
                 self.step_rrt()
         pg.quit()
 
     def step_rrt(self):
         self.rrt.start_point = np.array(self.start_point)
         self.rrt.end_point = np.array(self.end_point)
-        if self.plotter:
-            self.rrt.bool_map = self.plotter.map_arr
-        self.rrt.bool_map = np.array(self.nav_map).astype(np.uint8)
+        n_mask = scipy.ndimage.generate_binary_structure(2, 1)
+        neighborhood = np.zeros((self.robot_radius, self.robot_radius))
+        neighborhood[self.robot_radius // 2][self.robot_radius // 2] = 1
+        neighborhood = scipy.ndimage.binary_dilation(neighborhood, structure=n_mask).astype(n_mask.dtype)
+        for i in range(int(self.robot_radius // 2 / 3)):
+            neighborhood = scipy.ndimage.binary_dilation(neighborhood, structure=neighborhood).astype(n_mask.dtype)
+
+        bool_map = np.array(self.nav_map).astype(np.uint8) == 0
+        bool_map = scipy.ndimage.binary_erosion(bool_map, structure=neighborhood, border_value=1)
+        bool_map = bool_map == False
+        self.rrt.bool_map = bool_map
         self.rrt.start()
         self.rrt.step()
         print("start RRT")
         while self.running:
             self.update_keys()
             self.draw_map()
-            if self.step and not self.rrt.dist_reached:
+            if self.step:
                 self.rrt.step()
             for j in range(self.rrt.nodes.shape[0]):
                 i = self.rrt.nodes[j]
                 pg.draw.circle(self.screen, (0, 0, 255), list(map(lambda x: x * self.disp_scale, i)), 5)
             pg.draw.circle(self.screen, (255, 0, 0), list(map(lambda x: x * self.disp_scale, self.start_point)), 5)
             for i in range(1, self.rrt.node_num):
+
                 n = self.rrt.graph[i][0]
                 pg.draw.aaline(self.screen, (255, 0, 255), list(map(lambda x: x * self.disp_scale, self.rrt.nodes[i])), list(map(lambda x: x * self.disp_scale, self.rrt.nodes[n])))
             pg.draw.circle(self.screen, (255, 0, 255), list(map(lambda x: x * self.disp_scale, self.rrt.random_point)),
@@ -129,11 +138,11 @@ class RRT_sim:
             # out pygame
             pg.display.update()
             pg.display.flip()
-            self.clock.tick(40)
+            self.clock.tick(140)
             if not self.flow:
                 self.step = False
         pg.quit()
 
 
-#rrt_sim = RRT_sim()
-#rrt_sim.start()
+rrt_sim = RRT_sim()
+rrt_sim.start()
