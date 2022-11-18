@@ -13,7 +13,6 @@ class RRT:
         self.bool_map = None
         self.map_height = None
         self.map_width = None
-        self.closest_node = None
         self.edges = []
         self.node_num = 0
         self.edge_num = 0
@@ -28,7 +27,7 @@ class RRT:
         self.growth_factor = 100
         self.e = 5
         self.end_dist = 100
-        self.rrt_star_rad = 20
+        self.rrt_star_rad = 30
 
     def start(self):
         if not self.start_point.any():
@@ -43,16 +42,13 @@ class RRT:
         self.node_num = 1
         map_shape = self.bool_map.shape
         self.map_shape = (map_shape - np.ones(len(map_shape))).astype(np.uint32)
-        print(self.map_shape)
 
     def find_closest(self, point):
         nodes_tree = scipy.spatial.cKDTree(self.nodes)
         return nodes_tree.query(point)
 
     def check_obstacle(self, point1, point2):
-        point1 = np.array(point1)
-        point2 = np.array(point2)
-        shift_vector = point2 - point1
+        shift_vector = (point2 - point1).astype(np.int32)
         iters = sum(abs(shift_vector))
         shift_vector = shift_vector / iters
         all_shift = shift_vector
@@ -72,9 +68,10 @@ class RRT:
     def step(self):
         node = self.nodes[self.node_num - 1]
         dist = np.linalg.norm(node - self.end_point)
+        self.force_random = 1
         if self.force_random:
             self.add_random()
-            self.force_random -= 1
+            #self.force_random -= 1
         elif dist < self.end_dist and self.force_random == 0:
             self.add_near_end()
             if self.stuck > 10:
@@ -83,22 +80,48 @@ class RRT:
         else:
             self.add_random()
 
-    def iter_node_map(self):
-        pass
+
+
+####### slow ##############
+    def iter_node_map(self, node, curr_dim, pos):
+        iter = node[0]
+        mi = max(0, iter-self.rrt_star_rad)
+        ma = min(iter+self.rrt_star_rad, self.map_shape[curr_dim])
+
+        if node.shape[0] > 1:
+            node = node[1:]
+            curr_dim+=1
+            for i in range(mi, ma):
+                pos[curr_dim-1] = i
+                self.iter_node_map(node, curr_dim, pos)
+        else:
+            for i in range(mi, ma):
+                if self.node_map[(*pos, i)] != 0:
+                    self.node_neighbours.append(self.node_map[(*pos, i)])
+
     def check_node_region(self, new_node):
-        for i in range(new_node.shape):
-            pass
+        self.node_neighbours = []
+        curr_dim = 0
+        pos = [0]*(new_node.shape[0]-1)
+        self.iter_node_map(new_node, curr_dim, pos)
+        return self.node_neighbours
+############################################################
+
+
 
     def add_node_to_closest(self, new_node):
-        self.closest_node = self.find_closest(new_node)
-        node, dist = self.check_obstacle(self.nodes[self.closest_node[1]], new_node)
+
+        closest_node = self.find_closest(new_node)
+        node, dist = self.check_obstacle(self.nodes[closest_node[1]], new_node)
         if node.any():
-            self.edges.append([self.node_num, self.closest_node[1]])
+            neighbors = self.check_node_region(new_node)
+            print(neighbors)
+            self.edges.append([self.node_num, closest_node[1]])
             self.nodes = np.append(self.nodes, [node], axis=0).astype(np.uint32)
             self.edge_num += 1
-            self.graph[self.node_num] = [self.closest_node[1], [], dist+self.graph[self.closest_node[1]][2]]
+            self.graph[self.node_num] = [closest_node[1], [], dist+self.graph[closest_node[1]][2]]
             self.node_map[tuple(node)] = self.node_num
-            self.graph[self.closest_node[1]][1].append(self.node_num)
+            self.graph[closest_node[1]][1].append(self.node_num)
             self.node_num += 1
             return node
         else:
@@ -107,8 +130,8 @@ class RRT:
 
 
     def add_random(self):
-        random_point = (np.random.rand(2)*self.map_shape).astype(np.uint32)
-        print(random_point)
+        random_point = (np.random.rand(len(self.map_shape))*self.map_shape).astype(np.uint32)
+        self.random_point = random_point
         self.add_node_to_closest(random_point)
 
     def add_near_end(self):
