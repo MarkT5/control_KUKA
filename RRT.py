@@ -4,15 +4,29 @@ import scipy.spatial
 import cv2
 
 
+
 class RRT:
-    def __init__(self):
-        self.start_point = None
-        self.end_point = None
-        self.nodes = None
-        self.node_map = None
+    def __init__(self, /,
+                 start_point=None,
+                 end_point=None,
+                 bin_map=None,
+                 growth_factor=15,
+                 e=0.2,
+                 end_dist=10,
+                 rrt_star_rad=20):
+
+        self.start_point = start_point
+        self.end_point = end_point
+        self.bool_map = bin_map
+
+        self.nodes = np.array([self.start_point]).astype(np.uint32)
+        self.node_map = np.ones(self.bool_map.shape).astype(np.int16)*-1
+        self.node_map[tuple(self.start_point)] = 0
         self.graph = {}
-        self.bool_map = None
-        self.node_num = 0
+        self.graph[0] = [None, [], 0]
+        self.node_num = 1
+        map_shape = self.bool_map.shape
+        self.map_shape = (map_shape - np.ones(len(map_shape))).astype(np.uint32)
         self.stuck = 0
         self.force_random = 0
         self.dist_reached = False
@@ -20,28 +34,20 @@ class RRT:
         self.path = []
         self.graph_printed = False
 
-        # settings
-        self.growth_factor = 150
-        self.e = 2
-        self.end_dist = 100
-        self.rrt_star_rad = 300
-        self.robot_radius = 30
+        self.growth_factor = growth_factor
+        self.e = e
+        self.end_dist = end_dist
+        self.rrt_star_rad = rrt_star_rad
 
-    def start(self):
-        if not self.start_point.any():
+        if not start_point.any():
             print("No start point")
-        assert self.start_point.any()
-        if not self.end_point.any():
+        assert start_point.any()
+        if not end_point.any():
             print("No end point")
-        assert self.end_point.any()
-
-        self.nodes = np.array([self.start_point]).astype(np.uint32)
-        self.node_map = np.ones(self.bool_map.shape).astype(np.int16)*-1
-        self.node_map[tuple(self.start_point)] = 0
-        self.graph[0] = [None, [], 0]
-        self.node_num = 1
-        map_shape = self.bool_map.shape
-        self.map_shape = (map_shape - np.ones(len(map_shape))).astype(np.uint32)
+        assert end_point.any()
+        if not bin_map.any():
+            print("No bin_map")
+        assert bin_map.any()
 
     def find_closest(self, point, node_arr=np.array(False)):
         if not node_arr.any():
@@ -61,13 +67,18 @@ class RRT:
             all_shift = np.copy(shift_vector * i)
             c_point = np.around(point1 + shift_vector * i).astype(np.int64)
             if self.bool_map[tuple(c_point)]:
-                np.around(point1 + shift_vector * (i - 1)).astype(np.int64)
+                i-=1
+                iters_made = i
                 break
             if np.linalg.norm(shift_vector * i) >= self.growth_factor:
                 break
         if np.linalg.norm(all_shift) < self.e or not c_point.any():
-            return np.array(False), None, None
-        return c_point, np.linalg.norm(all_shift), iters_made==iters
+            return np.array(False), None, False
+        if iters_made > 1:
+            return c_point, np.linalg.norm(all_shift), iters_made==iters
+        else:
+            return np.array(False), None, False
+
 
     def step(self):
         node = self.nodes[self.node_num - 1]

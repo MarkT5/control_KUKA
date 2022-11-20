@@ -155,13 +155,13 @@ class GuiControl:
         initialises PyGame, updates all data, check pressed keys, updates screen
         :return:
         """
-        #self.init_pygame()
+        self.init_pygame()
         while self.screen.running:
             pass
-        #    if not self.economy_mode:
-        #        self.update_arm(self.cylindrical_scale)
-        #    self.update_keys()
-        #    self.screen.step()
+            if not self.economy_mode:
+                self.update_arm(self.cylindrical_scale)
+            self.update_keys()
+            self.screen.step()
         self.robot.disconnect()
 
     def change_m1_angle(self, val):
@@ -259,14 +259,6 @@ class GuiControl:
             self.robot.going_to_target_pos = False
             self.last_checked_pressed_keys = pressed_keys[:]
 
-        # arm_rot = 0
-        # if pg.K_z in pressed_keys:
-        #    arm_rot += 0.5
-        # if pg.K_x in pressed_keys:
-        #    arm_rot -= 0.5
-
-        # if arm_rot != 0:
-        #    self.robot.move_arm(m1=max(min(self.robot.arm_pos[0] + arm_rot, 134), -157))
 
     def update_lidar(self):
         """

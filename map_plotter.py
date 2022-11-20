@@ -7,8 +7,9 @@ log_data = False
 
 
 class MapPlotter:
-    def __init__(self, robot, width=300, map_size=300):
+    def __init__(self, robot=None, width=300, map_size=170, show_map=True):
         self.robot = robot
+        self.show_map = show_map
         self.map_size = map_size
         self.bg = np.array([[[190, 70, 20]] * width] * width, dtype=np.uint8)
         self.map_background = np.array([[[100, 100, 100]] * map_size] * map_size, dtype=np.uint8)
@@ -17,21 +18,50 @@ class MapPlotter:
         self.cent_x = map_size // 2
         self.cent_y = map_size // 2
         self.discrete = 20
+        self.pos = (0,0,0)
+        if not robot:
+            self.from_log()
         if log_data:
             self.log_file = open("lidar_odom_log/lidar_odom_log_9.txt", "a")
+
+    def from_log(self):
+        f = open("lidar_odom_log/lidar_odom_log_7.txt", "r")
+        txt_log_data = f.read().split('\n')
+        log_data = []
+        for i in txt_log_data:
+            sp_log_data = i.split(';')
+            if sp_log_data[-1] == '':
+                break
+            odom = sp_log_data[0].split(',')
+            lidar = sp_log_data[1].split(',')
+            odom = list(map(float, odom))
+            lidar = list(map(float, lidar))
+            log_data.append([odom, lidar])
+        self.log_data = log_data[:]
+        self.log_data_ind = 0
+
 
     def scale_to_arr(self, x, y):
         return (int(self.map_size / 2 + self.discrete * x), int(self.map_size / 2 - self.discrete * y))
 
     def create_map(self):
         time = 0
-        while cv2.waitKey(1) != 27:
-            pos, lidar = self.robot.lidar
+        running = True
+        while running:
+            if self.show_map:
+                running = cv2.waitKey(40) != 27
+            if self.robot:
+                pos, lidar = self.robot.lidar
+            else:
+                if self.log_data_ind < len(self.log_data)-1:
+                    pos, lidar = self.log_data[self.log_data_ind]
+                    self.log_data_ind+=1
             if not pos or not lidar:
                 continue
             x, y, ang = pos
+            self.pos = self.scale_to_arr(*pos[:-1])
             time += 1
-            if time < 500:
+            if time < 500 and self.robot:
                 continue
             else:
                 time = 0
@@ -41,18 +71,10 @@ class MapPlotter:
                 continue
 
             cent_y, cent_x = y, x
-            # cv2.circle(self.map_background, scale(1, 0), 4, (255, 255, 255), -1)
-            # cv2.circle(self.map_background, scale(0, 1), 4, (255, 0, 255), -1)
-            # cv2.circle(self.map_background, scale(cent_x, cent_y), 4, (255, 255, 255), -1)
             cent_y = cent_y - 0.3 * math.cos(ang + math.pi / 2)
             cent_x = cent_x + 0.3 * math.sin(ang + math.pi / 2)
-            # cv2.circle(self.map_background, scale(cent_x, cent_y), 4, (0, 255, 0), -1)
-            wall_1 = 0
-            wall_2 = 0
-            wall_len = 30
-            current_wall = 1
-            corner = None
-            for i in range(0, len(lidar)):
+
+            for i in range(40, len(lidar)-40):
                 lid_ang = i * math.radians(240) / len(lidar) - ang - math.radians(30)
                 lid_dist = lidar[i]
 
@@ -69,41 +91,12 @@ class MapPlotter:
 
                 ox = cent_x + lid_dist * math.sin(lid_ang)
                 oy = cent_y + lid_dist * math.cos(lid_ang)
-                # cv2.circle(self.map_background, scale(ox, oy), 4, (0, 0, 0), -1)
+
                 self.map_background[self.scale_to_arr(ox, oy)] = [0, 0, 0]
                 self.map_arr[self.scale_to_arr(ox, oy)] = 1
-                # detect corners
-                if i > 0:
-                    if lidar[i - 1] < lidar[i]:
-                        if current_wall == 1:
-                            wall_1 += 1
-                        else:
-                            if wall_2 < wall_len:
-                                wall_2 = 0
-                            current_wall = 1
-                            corner = self.scale_to_arr(ox, oy)
-                    else:
-                        if current_wall == 2:
-                            wall_2 += 1
-                        else:
-                            if wall_1 < wall_len:
-                                wall_1 = 0
-                            current_wall = 2
-                            corner = self.scale_to_arr(ox, oy)
+            if self.show_map:
+                res = cv2.resize(self.map_background, dsize=(1000, 1000), interpolation=cv2.INTER_NEAREST)
+                cv2.imshow("map", res)
+        if log_data:
+            self.log_file.close()
 
-                    if wall_1 >= wall_len and wall_2 >= wall_len:
-                        if corner:
-                            pass
-                            cv2.circle(self.map_background, (corner[1], corner[0]), 2, (0, 0, 255), -1)
-                            wall_1, wall_2 = 0, 0
-                            # self.map_background[corner] = [0, 0, 255]
-                    if lidar[i - 1] - lidar[i] > 1:
-                        wall_1, wall_2 = 0, 0
-            res = cv2.resize(self.map_background, dsize=(1000, 1000), interpolation=cv2.INTER_NEAREST)
-            cv2.imshow("map", res)
-        self.log_file.close()
-
-# robot = KUKA('192.168.88.25', ros=False, offline=False)
-
-# new_map = MapPlotter(robot)
-# new_map.show_map()

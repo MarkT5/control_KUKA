@@ -10,6 +10,8 @@ class Screen:
         self.fps = 24
         self.pressed_keys = []
         self.mouse_wheel_pos = 0
+        self.mouse_pos = [0,0]
+        self.mouse_clicked = 0
 
     def step(self):
         if self.running:
@@ -43,6 +45,7 @@ class Screen:
 
 
             elif event.type == pg.MOUSEBUTTONDOWN:
+                self.mouse_clicked = 1
                 for obj_ind in range(len(self.objects)):
                     obj = self.objects[obj_ind]
                     if obj.rect.collidepoint(pg.mouse.get_pos()):
@@ -54,6 +57,11 @@ class Screen:
                 obj = self.objects[self.pressed_obj_ind]
                 obj.dragged(pg.mouse.get_pos()[0] - obj.x, pg.mouse.get_pos()[1] - obj.y)
             else:
+                self.mouse_pos = pg.mouse.get_pos()
+                if self.mouse_clicked == 1 or self.mouse_clicked == 2:
+                    self.mouse_clicked = 2
+                else:
+                    self.mouse_clicked = 0
                 for obj_ind in range(len(self.objects)):
                     obj = self.objects[obj_ind]
                     if obj.rect.collidepoint(pg.mouse.get_pos()):
