@@ -7,7 +7,7 @@ log_data = False
 
 
 class MapPlotter:
-    def __init__(self, robot=None, width=300, map_size=170, show_map=True):
+    def __init__(self, robot=None, width=300, map_size=200, show_map=True):
         self.robot = robot
         self.show_map = show_map
         self.map_size = map_size
@@ -40,16 +40,18 @@ class MapPlotter:
         self.log_data = log_data[:]
         self.log_data_ind = 0
 
-
     def scale_to_arr(self, x, y):
         return (int(self.map_size / 2 + self.discrete * x), int(self.map_size / 2 - self.discrete * y))
+
+    def scale_to_m(self, x, y):
+        return (-self.map_size / 2 + x) / self.discrete, -(y - self.map_size / 2) / self.discrete
 
     def create_map(self):
         time = 0
         running = True
         while running:
             if self.show_map:
-                running = cv2.waitKey(40) != 27
+                running = cv2.waitKey(120) != 27
             if self.robot:
                 pos, lidar = self.robot.lidar
             else:
@@ -59,12 +61,7 @@ class MapPlotter:
             if not pos or not lidar:
                 continue
             x, y, ang = pos
-            self.pos = self.scale_to_arr(*pos[:-1])
-            time += 1
-            if time < 500 and self.robot:
-                continue
-            else:
-                time = 0
+            self.pos = pos
 
             if log_data:
                 self.log_file.write(", ".join(map(str, pos)) + "; " + ", ".join(map(str, lidar)) + "\n")

@@ -72,7 +72,7 @@ class KUKA:
         self.body_target_pos = [0, 0, 0]  # current body target position
         self.going_to_target_pos = False
         self.move_speed = (0, 0, 0)  # last sent move speed
-        self.move_to_target_max_speed = 2  # max move to target speed
+        self.move_to_target_max_speed = 0.5  # max move to target speed
         self.move_to_target_k = 1  # move to target proportional coefficient
 
         # dimensions (lengths of joints)
@@ -207,8 +207,10 @@ class KUKA:
         """
         Sends all available commands (thread)
         """
+
         send_ind = 0
         while self.operating:
+
             to_send = None
             while not to_send and self.operating:
                 self.send_lock.acquire()
@@ -225,6 +227,7 @@ class KUKA:
             else:
                 debug(f"message:{to_send}")
                 pass
+
 
     def _parse_data(self, data):
         """
@@ -281,21 +284,27 @@ class KUKA:
         """
         Reads data from sensors data port (thread)
         """
+
         data_buff_len = 0
         self.data_buff = b''
         while self.operating:
             if data_buff_len > 5000:
                 self.data_buff = b''
                 data_buff_len = 0
-            self.data_buff += self.conn.recv(1)
-            data_buff_len += 1
+            el = self.conn.recv(1)
+            if el != b'':
+                self.data_buff += el
+                data_buff_len += 1
             if self.data_buff[-1] == 13:
                 self.conn.recv(1)
-                #print(self.data_buff)
-                str_data = str(self.data_buff[:-1], encoding='utf-8')
+
+                try:
+                    str_data = str(self.data_buff[:-1], encoding='utf-8')
+                    self.data_parser_tht = thr.Thread(target=self._parse_data, args=(str_data,))
+                    self.data_parser_tht.start()
+                except:
+                    pass
                 self.data_buff = b''
-                self.data_parser_tht = thr.Thread(target=self._parse_data, args=(str_data,))
-                self.data_parser_tht.start()
 
     # get functions
     @property
@@ -403,7 +412,7 @@ class KUKA:
         self.move_speed = (f, s, r)
 
     # go to set coordinates
-    def go_to(self, x, y, ang=0):
+    def go_to(self, x, y, ang=0,/, prec=0.005, k=1):
         """
         Sends robot to given coordinates
         :param x: x position in relative coordinates
@@ -419,13 +428,15 @@ class KUKA:
                 self.body_target_pos_lock = thr.Lock()
                 self.going_to_target_pos = True
                 self.body_target_pos = [x, y, ang]
-                self.go_to_tr = thr.Thread(target=self.move_base_to_pos, args=())
+                self.go_to_tr = thr.Thread(target=self.move_base_to_pos, args=([prec, k]))
                 self.go_to_tr.start()
 
-    def move_base_to_pos(self):
+    def move_base_to_pos(self, prec=0.005, k = None):
         """
         Moving to point thread
         """
+        if not k:
+            k = self.move_to_target_k
         while self.operating and self.going_to_target_pos:
             self.body_target_pos_lock.acquire()
             x, y, ang = self.body_target_pos
@@ -435,12 +446,9 @@ class KUKA:
             loc_y = y - inc[1]
             rob_ang = inc[2]
             dist = math.sqrt(loc_x ** 2 + loc_y ** 2)
-            speed = min(self.move_to_target_max_speed, dist * self.move_to_target_k)
-            if dist < 0.005:
-                self.move_base(0, 0, 0)
-                time.sleep(0.01)
-                self.move_base(0, 0, 0)
-                self.going_to_target_pos = False
+            speed = min(self.move_to_target_max_speed, dist * k)
+            print(prec)
+            if dist < prec:
                 break
             targ_ang = math.atan2(loc_y, loc_x)
             loc_ang = targ_ang - rob_ang
@@ -448,6 +456,10 @@ class KUKA:
             side_speed = -speed * math.sin(loc_ang)
             self.move_base(fov_speed, side_speed, 0)
             time.sleep(1 / self.frequency)
+        self.move_base(0, 0, 0)
+        time.sleep(0.01)
+        self.move_base(0, 0, 0)
+        self.going_to_target_pos = False
 
     # move arm forward or inverse kinetic
     def move_arm(self, *args, **kwargs):

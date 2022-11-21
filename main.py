@@ -2,7 +2,6 @@ from KUKA import KUKA
 from Pygame_GUI.GUI_pygame import GuiControl
 from map_plotter import MapPlotter
 import threading as thr
-from path import RRT_sim
 
 robot = KUKA('192.168.88.25', ros=False, offline=False)
 

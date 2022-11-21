@@ -18,15 +18,15 @@ class RRT_sim:
         self.screen_size = 900
 
         self.discrete = 20
-        self.robot_radius = 6
+        self.robot_radius = 15
         self.screen_obj = Screen(self.screen_size, self.screen_size)
         self.screen = self.screen_obj.screen
-        self.move_speed = [0, 0, 0]
         self.move_speed_val = 0.5
         self.last_checked_pressed_keys = []
         self.running = True
         self.step = False
         self.flow = False
+        self.drive = False
         self.new_map = False
         self.end_point = np.array(False)
         self.start_point = np.array(False)
@@ -69,7 +69,7 @@ class RRT_sim:
         self.nav_map = np.copy(self.plotter.map_arr)
         self.map_shape = self.map_arr.shape
         self.map_k = self.screen_size // max(self.map_shape[0], self.map_shape[1])
-        self.start_point = np.array(self.plotter.pos)
+        self.start_point = np.array(self.plotter.scale_to_arr(*self.plotter.pos[:-1]))
         self.apply_robot_radius_to_map()
 
     def m_to_arr(self, coords):
@@ -85,28 +85,36 @@ class RRT_sim:
         return [x // self.map_k, y // self.map_k]
 
     def update_keys(self):
-        pressed_keys = self.screen_obj.pressed_keys
-
+        pressed_keys = self.screen_obj.pressed_keys[:]
+        move_speed = [0, 0, 0]
         fov = 0
         if pg.K_w in pressed_keys:
             fov += 1
+            self.drive = False
         if pg.K_s in pressed_keys:
             fov -= 1
-        self.move_speed[0] = fov * self.move_speed_val
+            self.drive = False
+        move_speed[0] = fov * self.move_speed_val
 
         rot = 0
         if pg.K_a in pressed_keys:
             rot += 1
+            self.drive = False
         if pg.K_d in pressed_keys:
             rot -= 1
-        self.move_speed[2] = rot * self.move_speed_val
+            self.drive = False
+        move_speed[2] = rot * self.move_speed_val
 
         side = 0
         if pg.K_q in pressed_keys:
             side += 1
+            self.drive = False
         if pg.K_e in pressed_keys:
             side -= 1
-        self.move_speed[1] = side * self.move_speed_val
+            self.drive = False
+        move_speed[1] = side * self.move_speed_val
+
+
 
         if pg.K_z in pressed_keys:
             self.step = True
@@ -114,13 +122,19 @@ class RRT_sim:
         elif pg.K_x in pressed_keys:
             self.flow = True
             self.step = True
-        elif pg.K_g in pressed_keys:
+        if pg.K_g in pressed_keys:
             self.new_map = True
+        if pg.K_v in pressed_keys:
+            self.drive = True
+        if pg.K_c in pressed_keys:
+            self.drive = False
 
-        if self.last_checked_pressed_keys != pressed_keys:
-            self.robot.move_base(*self.move_speed)
+        if not self.drive and self.last_checked_pressed_keys != pressed_keys:
+            self.robot.move_base(*move_speed)
             self.robot.going_to_target_pos = False
+
             self.last_checked_pressed_keys = pressed_keys[:]
+
         if self.screen_obj.mouse_clicked:
             self.screen_obj.mouse_clicked = False
             if not self.start_point.any():
@@ -140,6 +154,9 @@ class RRT_sim:
         if self.end_point.any():
             pg.draw.circle(self.screen, (0, 255, 0), list(map(lambda x: x * self.map_k, self.end_point)), 5)
 
+    def draw_curr_pos(self):
+        pg.draw.circle(self.screen, (255, 50, 50), list(map(lambda x: x * self.map_k, self.plotter.scale_to_arr(*self.plotter.pos[:-1]))), 10)
+
     def draw_nodes(self):
         for j in range(self.rrt.nodes.shape[0]):
             i = self.rrt.nodes[j]
@@ -155,10 +172,8 @@ class RRT_sim:
                        5)
 
     def draw_path(self):
-        if self.rrt.dist_reached:
-            self.rrt.get_path()
-            pg.draw.lines(self.screen, (255, 0, 0), False,
-                          [[*i] for i in list(map(lambda x: x * self.map_k, self.rrt.path))], 5)
+        pg.draw.lines(self.screen, (255, 0, 0), False,
+                        [[*i] for i in list(map(lambda x: x * self.map_k, self.rrt.path))], 5)
 
     def apply_robot_radius_to_map(self):
         n_mask = scipy.ndimage.generate_binary_structure(2, 1)
@@ -175,9 +190,15 @@ class RRT_sim:
         self.rrt = RRT(start_point=np.array(self.start_point), end_point=np.array(self.end_point),
                        bin_map=self.bool_map)
 
+
+
     def start(self):
+
         while self.running:
+            curr_point = 1
             while not self.new_map:
+
+                goal = None
                 self.update_keys()
                 self.screen_obj.step()
                 if self.nav_map.any():
@@ -193,12 +214,39 @@ class RRT_sim:
                     break
             while not self.new_map:
                 self.update_keys()
+                if not self.drive:
+                    self.robot.going_to_target_pos = False
+                    goal = None
                 self.draw_map()
                 if self.step:
                     self.rrt.step()
                 self.draw_nodes()
                 self.draw_edges()
-                self.draw_path()
+                if self.rrt.dist_reached:
+                    self.rrt.get_path()
+                    self.draw_path()
+                    self.draw_curr_pos()
+                    if self.drive and curr_point < len(self.rrt.path)+2:
+
+                        if curr_point < len(self.rrt.path)+1:
+                            prec = 0.08
+                            k=3
+                            goal = self.plotter.scale_to_m(*self.rrt.path[-curr_point])
+                        else:
+                            prec = 0.005
+                            k=1
+
+                        if self.drive and not self.robot.going_to_target_pos:
+                            self.robot.go_to(*goal, prec=prec, k=k)
+                            print(goal)
+                            curr_point += 1
+
+
+
+                    else:
+                        self.drive = False
+
+
                 self.screen_obj.step()
                 if not self.flow:
                     self.step = False
@@ -208,9 +256,9 @@ class RRT_sim:
         pg.quit()
 
 
-robot = KUKA('192.168.88.25', ros=False, offline=True)
+robot = KUKA('192.168.88.25', ros=False, offline=False)
 
-new_map = MapPlotter(None)
+new_map = MapPlotter(robot)
 map_thr = thr.Thread(target=new_map.create_map, args=())
 map_thr.start()
 

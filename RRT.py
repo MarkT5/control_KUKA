@@ -11,7 +11,7 @@ class RRT:
                  end_point=None,
                  bin_map=None,
                  growth_factor=15,
-                 e=0.2,
+                 e=0.04,
                  end_dist=10,
                  rrt_star_rad=20):
 
