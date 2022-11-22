@@ -19,6 +19,8 @@ class RRT:
         self.end_point = end_point
         self.bool_map = bin_map
 
+        self.star = True
+
         self.nodes = np.array([self.start_point]).astype(np.uint32)
         self.node_map = np.ones(self.bool_map.shape).astype(np.int16)*-1
         self.node_map[tuple(self.start_point)] = 0
@@ -167,8 +169,16 @@ class RRT:
         closest_node = self.find_closest(new_node)
         node, dist, _ = self.check_obstacle(self.nodes[closest_node[1]], new_node)
         if node.any():
-            neighbors = self.check_node_region(node)
-            self.find_best_connection(node, neighbors)
+            if self.star:
+                neighbors = self.check_node_region(node)
+                self.find_best_connection(node, neighbors)
+            else:
+                self.nodes = np.append(self.nodes, [node], axis=0).astype(np.uint32)
+                self.graph[self.node_num] = [closest_node[1], [], dist + self.graph[closest_node[1]][2]]
+                self.node_map[tuple(node)] = self.node_num
+                self.graph[closest_node[1]][1].append(self.node_num)
+                self.node_num += 1
+
             return node
         else:
             return np.array(False)

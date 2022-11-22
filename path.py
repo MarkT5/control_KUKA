@@ -18,7 +18,7 @@ class RRT_sim:
         self.screen_size = 900
 
         self.discrete = 20
-        self.robot_radius = 15
+        self.robot_radius = 10
         self.screen_obj = Screen(self.screen_size, self.screen_size)
         self.screen = self.screen_obj.screen
         self.move_speed_val = 0.5
