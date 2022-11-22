@@ -83,8 +83,10 @@ class MapPlotter:
                     sx, sy = self.scale_to_arr(ox, oy)
                     if sx > 499 or sy > 499 or sx < 1 or sy < 1:
                         break
-                    self.map_background[self.scale_to_arr(ox, oy)] = [255, 255, 255]
-                    self.map_arr[self.scale_to_arr(ox, oy)] = 0
+                    xn, yn = self.scale_to_arr(ox, oy)
+                    if 0 < xn < self.map_size and 0 < yn < self.map_size:
+                        self.map_background[xn, yn] = [255, 255, 255]
+                        self.map_arr[self.scale_to_arr(ox, oy)] = 0
 
                 ox = cent_x + lid_dist * math.sin(lid_ang)
                 oy = cent_y + lid_dist * math.cos(lid_ang)

@@ -19,7 +19,7 @@ class RRT:
         self.end_point = end_point
         self.bool_map = bin_map
 
-        self.star = True
+        self.star = False
 
         self.nodes = np.array([self.start_point]).astype(np.uint32)
         self.node_map = np.ones(self.bool_map.shape).astype(np.int16)*-1

@@ -18,7 +18,7 @@ class RRT_sim:
         self.screen_size = 900
 
         self.discrete = 20
-        self.robot_radius = 10
+        self.robot_radius = 15
         self.screen_obj = Screen(self.screen_size, self.screen_size)
         self.screen = self.screen_obj.screen
         self.move_speed_val = 0.5
@@ -67,7 +67,7 @@ class RRT_sim:
             pass
         self.map_arr = np.copy(self.plotter.map_background)
         self.nav_map = np.copy(self.plotter.map_arr)
-        self.map_shape = self.map_arr.shape
+        self.map_shape = self.nav_map.shape
         self.map_k = self.screen_size // max(self.map_shape[0], self.map_shape[1])
         self.start_point = np.array(self.plotter.scale_to_arr(*self.plotter.pos[:-1]))
         self.apply_robot_radius_to_map()
@@ -176,7 +176,7 @@ class RRT_sim:
                         [[*i] for i in list(map(lambda x: x * self.map_k, self.rrt.path))], 5)
 
     def apply_robot_radius_to_map(self):
-        n_mask = scipy.ndimage.generate_binary_structure(2, 1)
+        n_mask = scipy.ndimage.generate_binary_structure(len(self.map_shape), 3)
         neighborhood = np.zeros((self.robot_radius, self.robot_radius))
         neighborhood[self.robot_radius // 2][self.robot_radius // 2] = 1
         neighborhood = scipy.ndimage.binary_dilation(neighborhood, structure=n_mask).astype(n_mask.dtype)
@@ -229,8 +229,8 @@ class RRT_sim:
                     if self.drive and curr_point < len(self.rrt.path)+2:
 
                         if curr_point < len(self.rrt.path)+1:
-                            prec = 0.08
-                            k=3
+                            prec = 0.005
+                            k=1
                             goal = self.plotter.scale_to_m(*self.rrt.path[-curr_point])
                         else:
                             prec = 0.005
@@ -238,7 +238,6 @@ class RRT_sim:
 
                         if self.drive and not self.robot.going_to_target_pos:
                             self.robot.go_to(*goal, prec=prec, k=k)
-                            print(goal)
                             curr_point += 1
 
 

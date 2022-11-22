@@ -72,7 +72,7 @@ class KUKA:
         self.body_target_pos = [0, 0, 0]  # current body target position
         self.going_to_target_pos = False
         self.move_speed = (0, 0, 0)  # last sent move speed
-        self.move_to_target_max_speed = 0.5  # max move to target speed
+        self.move_to_target_max_speed = 0.2  # max move to target speed
         self.move_to_target_k = 1  # move to target proportional coefficient
 
         # dimensions (lengths of joints)
@@ -447,7 +447,6 @@ class KUKA:
             rob_ang = inc[2]
             dist = math.sqrt(loc_x ** 2 + loc_y ** 2)
             speed = min(self.move_to_target_max_speed, dist * k)
-            print(prec)
             if dist < prec:
                 break
             targ_ang = math.atan2(loc_y, loc_x)
