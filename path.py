@@ -18,7 +18,7 @@ class RRT_sim:
         self.screen_size = 900
 
         self.discrete = 20
-        self.robot_radius = 15
+        self.robot_radius = 17
         self.screen_obj = Screen(self.screen_size, self.screen_size)
         self.screen = self.screen_obj.screen
         self.move_speed_val = 0.5
@@ -152,10 +152,18 @@ class RRT_sim:
         if self.start_point.any():
             pg.draw.circle(self.screen, (255, 0, 0), list(map(lambda x: x * self.map_k, self.start_point)), 5)
         if self.end_point.any():
-            pg.draw.circle(self.screen, (0, 255, 0), list(map(lambda x: x * self.map_k, self.end_point)), 5)
+            pg.draw.line(self.screen, (0, 102, 51), [list(map(lambda x: x * self.map_k, self.end_point))[0]-10,
+                                                     list(map(lambda x: x * self.map_k, self.end_point))[1]-10],
+                         [list(map(lambda x: x * self.map_k, self.end_point))[0]+10,
+                          list(map(lambda x: x * self.map_k, self.end_point))[1]+10], 5)
+            pg.draw.line(self.screen, (0, 102, 51), [list(map(lambda x: x * self.map_k, self.end_point))[0] + 10,
+                                                     list(map(lambda x: x * self.map_k, self.end_point))[1] - 10],
+                         [list(map(lambda x: x * self.map_k, self.end_point))[0] - 10,
+                          list(map(lambda x: x * self.map_k, self.end_point))[1] + 10], 5)
+            #pg.draw.circle(self.screen, (0, 102, 51), list(map(lambda x: x * self.map_k, self.end_point)), 5)
 
     def draw_curr_pos(self):
-        pg.draw.circle(self.screen, (255, 50, 50), list(map(lambda x: x * self.map_k, self.plotter.scale_to_arr(*self.plotter.pos[:-1]))), 10)
+        pg.draw.circle(self.screen, (255, 0, 102), list(map(lambda x: x * self.map_k, self.plotter.scale_to_arr(*self.plotter.pos[:-1]))), 10)
 
     def draw_nodes(self):
         for j in range(self.rrt.nodes.shape[0]):
