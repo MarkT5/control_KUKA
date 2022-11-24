@@ -21,7 +21,6 @@ def open_log():
         lidar = list(map(float, lidar))
         log_data.append([odom, lidar])
 
-    # print(len(log_data), "samples in log file")
     return log_data[80]
 
 
@@ -90,10 +89,6 @@ def best_fit_transform(A, B, cornerA_ind, cornerB_ind):
     weights = np.diag(weights)
     centroid_A = np.sum(np.dot(weights, A), axis=0) / weights_sum
     centroid_B = np.sum(np.dot(weights, B), axis=0) / weights_sum
-    #print(centroid_A, "new")
-    #centroid_A = np.mean(A, axis=0)
-    #centroid_B = np.mean(B, axis=0)
-    #print(centroid_A, "old")
     AA = A - centroid_A
     BB = B - centroid_B
     # rotation matrix
@@ -162,7 +157,6 @@ def icp(A, B, cornerA_ind, cornerB_ind, init_pose=None, max_iterations=20, toler
         mean_error = np.mean(distances)
         if np.abs(prev_error - mean_error) < tolerance:
             error = np.abs(prev_error - mean_error)
-            print('smol')
             break
 
         prev_error = mean_error
@@ -192,37 +186,41 @@ def split_objects(data):
     out_objects = sorted(out_objects, key=lambda x: len(x), reverse=True)
     return out_objects
 
+approx_reg = int(map_size * 0.4)
+approx_reg_mid = int(approx_reg / 2)
+n_mask = scipy.ndimage.generate_binary_structure(2, 1)
+neighborhood = np.zeros((approx_reg, approx_reg))
+neighborhood[approx_reg_mid][approx_reg_mid] = 1
+neighborhood = scipy.ndimage.binary_dilation(neighborhood, structure=n_mask).astype(n_mask.dtype)
+for i in range(int(approx_reg_mid / 3)):
+    neighborhood = scipy.ndimage.binary_dilation(neighborhood, structure=neighborhood).astype(n_mask.dtype)
 
 def hough_transform_dec(input):
-    resolution = int(map_size * 2.5)
-    approx_reg = int(map_size * 0.2)
-    min_detect_val = 0.08
-    approx_reg_mid = int(approx_reg / 2)
+    resolution = 800*int(map_size*2)
+    vert_res = 800/map_size
     max_point_val = len(input)
+    min_detect_val = 1/max_point_val*10
     detected_peaks_params = []
 
     hough_graph = np.zeros((resolution, resolution))
-    for i in range(len(input)):
+    for i in range(40, len(input)-40):
         for j in range(1, resolution):
-            point = int(input[i][1] * math.cos(math.pi / resolution * j) - input[i][0] * math.sin(
+
+            point = int(input[i][1] * vert_res * math.cos(math.pi / resolution * j) - input[i][0] * vert_res * math.sin(
                 math.pi / resolution * j) + resolution / 2)
             if abs(point) < resolution:
                 hough_graph[point][j] += 1 / max_point_val
 
     resized = cv2.resize(hough_graph, (500, 500), interpolation=cv2.INTER_AREA)
     cv2.imshow("hough_graph", resized)
+    cv2.waitKey(10)
 
     # define an 8-connected neighborhood
-    n_mask = scipy.ndimage.generate_binary_structure(2, 1)
-    neighborhood = np.zeros((approx_reg, approx_reg))
-    neighborhood[approx_reg_mid][approx_reg_mid] = 1
-    neighborhood = scipy.ndimage.binary_dilation(neighborhood, structure=n_mask).astype(n_mask.dtype)
-    for i in range(int(approx_reg_mid / 3)):
-        neighborhood = scipy.ndimage.binary_dilation(neighborhood, structure=neighborhood).astype(n_mask.dtype)
+
 
     # apply the local maximum filter; all pixel of maximal value
     # in their neighborhood are set to 1
-    local_max = scipy.ndimage.maximum_filter(hough_graph, size=20) == hough_graph
+    local_max = scipy.ndimage.maximum_filter(hough_graph, size=30) == hough_graph
 
     # local_max is a mask that contains the peaks we are
     # looking for, but also the background.
@@ -230,23 +228,33 @@ def hough_transform_dec(input):
 
     # we create the mask of the background
     background = (hough_graph < min_detect_val)
-
+    background = (background == False)
     # a little technicality: we must erode the background in order to
     # successfully subtract it form local_max, otherwise a line will
     # appear along the background border (artifact of the local maximum filter)
-    eroded_background = scipy.ndimage.binary_erosion(background, structure=neighborhood, border_value=1)
-    background_inv = (eroded_background == False)
+
+    #eroded_background = scipy.ndimage.binary_erosion(background, structure=neighborhood, border_value=1)
+
+    #resized = cv2.resize(eroded_background * 0.9, (500, 500), interpolation=cv2.INTER_AREA)  #
+    #cv2.imshow("eroded_background", resized)
+
+
 
     # we obtain the final mask, containing only peaks,
     # by removing the background from the local_max mask (and operation)
-    detected_peaks = local_max & background_inv
+    detected_peaks = local_max & background
+
+    resized = cv2.resize(detected_peaks * 0.9, (500, 500), interpolation=cv2.INTER_AREA)
+    cv2.imshow("detected_peaks", resized)
+    cv2.waitKey(10)
 
     for i in range(len(detected_peaks)):
         for j in range(len(detected_peaks)):
             if detected_peaks[i][j]:
                 f, p, = math.pi / resolution * j, i - resolution / 2
-                detected_peaks_params.append([f, p, hough_graph[i][j]])
+                detected_peaks_params.append([f, p/800, hough_graph[i][j]])
     detected_peaks_params = sorted(detected_peaks_params, key=lambda x: x[-1], reverse=True)
+    print(detected_peaks_params)
     return detected_peaks_params
 
 
@@ -288,9 +296,6 @@ def find_farthest(points, threshold=1):
         return None
     if max_dist == -1:
         return None
-    # print(max_dist)
-    # draw_line(a_main, b_main)
-    # draw_line(a_perp, b_perp)
     return max_i
 
 
@@ -322,7 +327,6 @@ def douglas_peucker(points):
     for a in range(iters):
         for i in range(1, len(point_list)):
             point_ind = (point_list[i - 1] + point_list[i]) // 2
-            # print(3**(3-8*2*(abs(point_ind-all_points//2))/all_points))
             add_point = find_farthest(list(points[point_list[i - 1]:point_list[i]]), 2)
             if not add_point:
                 weights[i - 1] += point_list[i] - point_list[i - 1]
@@ -383,7 +387,6 @@ def find_corners(object, approx_points_ind):
         x2, y2 = connection_coords[i]
         a_curr = 0
         if x1 == x2 or y1 == y2:
-            #print("vert")
             pass
         else:
             a_curr = (y1 - y2) / (x1 - x2)
@@ -417,14 +420,11 @@ def check_existing_corners_by_lines(object):
     min_offset = 10
     for c in range(len(corners)):
         line1, line2, corner, coords = corners[c]
-        print(line1, line2)
         for i in range(len(all_detected_corners_line)):
             xof = (corner[0] - all_detected_corners_line[i][2][0]) ** 2
             yof = (corner[1] - all_detected_corners_line[i][2][1]) ** 2
             if max_offset > xof + yof > min_offset:
                 line1_f, line2_f, corner_f, coords_f = all_detected_corners_line[i]
-                #pyplot.axline((0, line1[1]), slope=math.tan(line1[0]), color="black", linestyle=(0, (5, 5)))
-                #pyplot.axline((0, line2[1]), slope=math.tan(line2[0]), color="black", linestyle=(0, (5, 5)))
                 pyplot.plot([coords[0][0], coords[1][0], coords[2][0]], [coords[0][1], coords[1][1], coords[2][1]], label='curr', linestyle="solid")
                 pyplot.plot([coords_f[0][0], coords_f[1][0], coords_f[2][0]], [coords_f[0][1], coords_f[1][1], coords_f[2][1]], label='node', linestyle="solid")
                 pos_err = corner-corner_f
@@ -432,9 +432,7 @@ def check_existing_corners_by_lines(object):
                     rot_err = (line1[0] - line1_f[0] + line2[0] - line2_f[0]) / 2
                 else:
                     rot_err = (line1[0] - line2_f[0] + line2[0] - line1_f[0]) / 2
-                print(pos_err, math.degrees(rot_err),math.degrees(line1[0]))
                 pyplot.axline((0, line1[1]), slope=math.tan(line1[0]), color="black", linestyle=(0, (5, 5)))
-                #pyplot.axline((0, line2[1]), slope=math.tan(line2[0]), color="black", linestyle=(0, (5, 5)))
 
 
 
@@ -462,7 +460,6 @@ def check_existing_corners(object):
             if max_offset > xof+yof > min_offset:
                 #icp here
                 icp_out = icp(corners[c][0], all_detected_corners[i][1], corner_rel_ind, all_detected_corners[i][2])
-                print(icp_out[-1])
                 if True:
                     pyplot.plot([p[0] for p in corners[c][0]], [p[1] for p in corners[c][0]], 'o', label='points 2')
 

@@ -87,7 +87,7 @@ class GuiControl:
                 self.step = False
                 self.body_pos_screen = np.copy(self.body_pos_background)
                 self.update_body_pos()
-                self.update_lidar()
+
 
                 self.odom, self.lidar = self.log_data[self.log_data_ind]
                 if not self.pause and self.log_data_ind + 1 < len(self.log_data):
@@ -97,17 +97,23 @@ class GuiControl:
                 self.m1_slider.set_val(self.log_data_ind)
 
                 object_coords = split_objects(self.log_data[self.log_data_ind])
+                approx_points = hough_transform_dec(np.array(conv_cil_to_dec(self.log_data[self.log_data_ind])))
+                for i in approx_points:
+                    if i[2] > 0.1:
+                        self.draw_P_TH_line(i[1], i[0]-math.pi/2)
+                self.update_lidar()
+
                 for object in object_coords:
-                    approx_points, _ = douglas_peucker(object)
-                    connection_coords = [[object[p][0], object[p][1]] for p in approx_points]
-                    self.draw_wall_line(connection_coords)
+                    pass
+                    # print(approx_points)
+                    # connection_coords = [[object[p][0], object[p][1]] for p in approx_points]
+                    # self.draw_wall_line(connection_coords)
 
-                    check_existing_corners_by_lines(object)
-                    #check_existing_corners(object)
-
+                    # check_existing_corners_by_lines(object)
+                    # check_existing_corners(object)
 
             self.screen.step()
-            self.clock.tick(10)
+            self.clock.tick(3)
 
     def update_keys(self):
         """
@@ -128,15 +134,38 @@ class GuiControl:
             self.log_data_ind += 1
             self.step = True
 
+    def draw_P_TH_line(self, P, TH, color=(255, 255, 0)):
+        w = self.width // 2 * discrete
+        x1, y1, x2, y2, x3, y3, x4, y4 = w, w, w, w, w, w, w, w
+        cTH = math.cos(TH)
+        sTH = math.sin(TH)
+        y1 = w
+        y3 = -w
+        if math.sin(TH):
+            x1 = int((P - y1 * cTH) / sTH)
+            x3 = int((P - y3 * cTH) / sTH)
+        x2 = w
+        x4 = -w
+        if cTH:
+            y2 = int((P - x2 * sTH) / cTH)
+            y4 = int((P - x4 * sTH) / cTH)
+        k = discrete/self.move_body_scale
+        cross = [[x1, y1], [x2, y2], [x3, y3], [x4, y4]]
+        line = []
+        for i in cross:
+            if -w <= i[0] <= w and -w <= i[1] <= w:
+                line.append((int(i[0]//k)+self.width//2, int(i[1]//k+self.width//2)))
+        if len(line) > 1:
+            cv2.line(self.body_pos_screen, line[0], line[1], color, max(1, int(0.05 * self.move_body_scale)))
 
     def draw_wall_line(self, connection_coords, color=(255, 255, 255)):
         connection_coords = [
             [self.width // 2 - int(p[1] * self.line_scale),
-            self.width // 2 - int(p[0] * self.line_scale)]
+             self.width // 2 - int(p[0] * self.line_scale)]
             for p in connection_coords]
         for dot in range(1, len(connection_coords)):
             cv2.line(self.body_pos_screen, connection_coords[dot - 1], connection_coords[dot], color,
-                    max(1, int(0.05 * self.move_body_scale)))
+                     max(1, int(0.05 * self.move_body_scale)))
 
     def update_lidar(self):
         """
@@ -206,7 +235,6 @@ class GuiControl:
         y2 = int(-x * self.move_body_scale - yw2 - yl2 + self.width // 2)
         cv2.line(self.body_pos_screen, (x1, y1), (x2, y2), (255, 255, 255),
                  max(1, int(0.02 * self.move_body_scale)))
-
 
 
 sim = GuiControl(700, "../lidar_odom_log/lidar_odom_log_9.txt")
