@@ -7,3 +7,20 @@ rospack profile
 
 roslaunch youbot_tl_test ytl.launch
 
+
+
+
+
+autorun:
+cd home/youbot/catkin_ws/devel
+touch autorun
+in:
+---------------------------------------
+source setup.bash
+rospack profile
+----------------------------------------
+
+chmod +x ./autorun
+
+crontab -e
+@reboot sudo bash -x home/youbot/catkin_ws/devel/autorun
