@@ -13,13 +13,13 @@ from mjpeg.client import MJPEGClient
 deb = True
 
 
-def debug(inf):
+def debug(inf, /, end="\n"):
     """
     Prints info if variable deb is True
     :param inf: info to print
     """
     if deb:
-        print(inf)
+        print(inf, end=end)
 
 
 def range_cut(mi, ma, val):
@@ -94,35 +94,35 @@ class KUKA:
         # connection
         debug(f"connecting to {ip}")
         self.connected = True
-
-        # connecting ROS
         if ros:
             debug("starting ROS")
             self.connect_ssh()
             time.sleep(5)
-            debug("ROS launched")
-        try:
-            debug("connecting to control channel")
-            # init socket
-            self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.conn.settimeout(2)
-            self.conn.connect((self.ip, 7777))
+        self.connected = True
+        self.operating = True
+        while self.connected:
+            try:
+                debug("connecting to control channel")
+                # init socket
+                self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.conn.settimeout(2)
+                self.conn.connect((self.ip, 7777))
+                # init reading thread
+                self.data_lock = thr.Lock()
+                self.send_lock = thr.Lock()
+                self.data_thr = thr.Thread(target=self._receive_data, args=())
+                self.send_thr = thr.Thread(target=self.send_data, args=())
+                time.sleep(1)
+                self.data_thr.start()
+                self.send_thr.start()
+                debug("connected *maybe* to 7777 (data stream)")
+                break
 
-            # init reading thread
-            self.data_lock = thr.Lock()
-            self.send_lock = thr.Lock()
-            self.data_thr = thr.Thread(target=self._receive_data, args=())
-            self.send_thr = thr.Thread(target=self.send_data, args=())
-            time.sleep(1)
-            self.data_thr.start()
-            self.send_thr.start()
-
-            debug("connected *maybe* to 7777 (data stream)")
-
-        except:
-            self.connected *= False
-            debug("failed to connect to 7777 (data stream)")
-        self.operating = self.connected
+            except:
+                debug("failed to connect to 7777 (data stream)")
+                debug("starting/restarting ROS")
+                self.connect_ssh()
+                time.sleep(5)
 
         # connecting to video server
         if self.connected:
@@ -135,10 +135,9 @@ class KUKA:
             debug("waiting for initial arm position")
             self.corr_arm_pos = [0, 0, 0, 0, 0]
             self.arm_pos[:-1] = self.corr_arm_pos
-            #раскомментить, для ожтдания данных с руки
+            # раскомментить, для ожтдания данных с руки
             # while not self.corr_arm_pos:
             #    time.sleep(0.1)
-
 
     def init_rgb_client(self):
         """
@@ -178,14 +177,49 @@ class KUKA:
         port = 22
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(hostname=self.ip, username=user, password=password, port=port)
+        if self.ip[-1] == "1":
+            password = "111111"
+        elif self.ip[-1] == "3":
+            password = "0987654321"
+        elif self.ip[-1] == "4":
+            password = "112233"
+        elif self.ip[-1] == "5":
+            password = "111111"
+        try:
+            client.connect(hostname=self.ip, username=user, password=password, port=port)
+        except:
+            self.connected = False
+            self.operating = False
+            return
         ssh = client.invoke_shell()
         time.sleep(0.5)
+        debug("log as root")
+        ssh.send(b"sudo -s\n")
+        time.sleep(0.5)
+        ssh.send(password.encode("utf-8") + b"\n")
+        debug("cleaning screen...")
+        time.sleep(0.5)
+        ssh.send(b"pkill screen\n")
+        time.sleep(0.5)
         ssh.send(b"screen -S roslaunch\n")
-        time.sleep(2)
+        debug("roslaunch screen created")
+        time.sleep(0.5)
         ssh.send(b"roslaunch youbot_tl_test ytl.launch\n")
-        debug(ssh.recv(3000)[-100:].decode("utf-8"))
+        ssh_msg = ""
+        ln_ind = 0
+        debug("waiting ros to start...")
+
+        for i in range(1000):
+            ssh_msg += ssh.recv(1).decode("utf-8")
+            if ssh_msg.count("First ROS iter OK"):
+                debug("Streaming data")
+                client.close()
+                return
+        self.connected = False
+        self.operating = False
         client.close()
+
+
 
     # receiving and parsing sensor data
 
@@ -227,7 +261,6 @@ class KUKA:
             else:
                 debug(f"message:{to_send}")
                 pass
-
 
     def _parse_data(self, data):
         """
@@ -412,7 +445,7 @@ class KUKA:
         self.move_speed = (f, s, r)
 
     # go to set coordinates
-    def go_to(self, x, y, ang=0,/, prec=0.005, k=1):
+    def go_to(self, x, y, ang=0, /, prec=0.005, k=1):
         """
         Sends robot to given coordinates
         :param x: x position in relative coordinates
@@ -431,7 +464,7 @@ class KUKA:
                 self.go_to_tr = thr.Thread(target=self.move_base_to_pos, args=([prec, k]))
                 self.go_to_tr.start()
 
-    def move_base_to_pos(self, prec=0.005, k = None):
+    def move_base_to_pos(self, prec=0.005, k=None):
         """
         Moving to point thread
         """
@@ -612,8 +645,8 @@ class KUKA:
         Moves arm to folded position\n
         Disconnects from robot
         """
+        self.operating = False
         if self.connected:
-            self.operating = False
             self.move_base()
             self.move_arm(0, 56, -80, -90, 0, 2)
             time.sleep(1)
