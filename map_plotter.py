@@ -49,7 +49,7 @@ class MapPlotter:
     def create_map(self):
         time = 0
         running = True
-        while running:
+        while running and self.robot.operating:
             if self.show_map:
                 running = cv2.waitKey(120) != 27
             if self.robot:

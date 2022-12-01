@@ -6,7 +6,7 @@ import numpy as np
 
 from Pygame_GUI.Objects import *
 from Pygame_GUI.Screen import Screen
-
+from KUKA import KUKA
 deb = True
 
 
@@ -19,7 +19,15 @@ class GuiControl:
     def __init__(self, width, height, robot):
 
         # robot class
-        self.robot = robot
+        if isinstance(robot, list):
+            self.robots_num = len(robot)
+            self.robots = robot
+            self.robot = KUKA(robot[0])
+            self.curr_robot = 0
+        else:
+            self.robot = robot
+            self.robots = []
+            self.robots_num = 0
 
         # window properties
         self.width = width
@@ -76,7 +84,7 @@ class GuiControl:
             m1_ang, m2_ang, m3_ang, m4_ang, m5_ang, grip = 0, 0, 0, 0, 0, 0
         self.screen = Screen(1240, 780)
         Button(self.screen, x=750, y=700, width=100, height=50, color=(150, 255, 170), func=self.change_cam_mode)
-        Button(self.screen, x=900, y=700, width=100, height=50, color=(150, 255, 170))
+        Button(self.screen, x=900, y=700, width=100, height=50, color=(150, 255, 170), func=self.change_robot)
         self.m1_slider = Slider(self.screen,
                                 min=-134, max=157, val=m1_ang,
                                 x=690, y=500,
@@ -134,6 +142,17 @@ class GuiControl:
         else:
             self.robot_cam_pygame.cv_mat_stream = self.robot.depth_camera
         self.current_cam_mode = not self.current_cam_mode
+
+    def change_robot(self, *args):
+        self.curr_robot += 1
+        del self.robot
+        if self.curr_robot >= self.robots_num:
+            self.curr_robot = 0
+        if self.robots_num > 1:
+            self.robot = KUKA(self.robots[self.curr_robot])
+            self.current_cam_mode = not self.current_cam_mode
+            self.change_cam_mode()
+
 
     def body_pos_stream(self):
         """
