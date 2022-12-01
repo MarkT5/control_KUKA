@@ -1,3 +1,25 @@
+nano etc/network/interfaces
+--------------------------------------
+#MicroTik router
+iface enp0s25 inet static
+        address 192.168.88.2n
+        netmask 255.255.255.0
+        gateway 192.168.88.6
+        dns-nameservers 192.168.88.6 8.8.8.8
+
+# The primary network interface
+auto enp0s25
+auto ens36
+iface ens36 inet manual
+up ifconfig ens36 up
+-----------------------------------------
+
+ifdown -s
+ifup -a
+
+apt install network-manager
+
+
 sudo apt-get update
 sudo apt-get upgrade
 sudo sh -c 'echo "deb http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros-latest.list'
@@ -30,12 +52,17 @@ sudo apt install ros-kinetic-openni* -y
 sudo apt install ros-kinetic-web-video-server -y
 sudo apt install ros-kinetic-robot-state-publisher -y
 
-sudo apt install ros-kinetic-joint-state-publisher
+sudo apt install ros-kinetic-joint-state-publisher -y
 
 
 
 nano /opt/ros/kinetic/share/youbot_driver/config/youbot-ethercat.cfg
 Значение EthernetDevice c eth0 на ens36
+
+
+nano ~/.bashrc
+в самом низу после source
+source /home/youbot/catkin_ws/devel/setup.bash
 
 sudo nano /etc/openni/GlobalDefaults.ini
 раскоментить UsbInterface=2
