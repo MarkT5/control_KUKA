@@ -38,7 +38,7 @@ class KUKA:
     KUKA youbot controller
     """
 
-    def __init__(self, ip, /, ros=False, offline=False, read_depth=True):
+    def __init__(self, ip, /, ros=False, offline=False, read_depth=True, camera_enable=True):
         """
         Initializes robot KUKA youbot\n
         Establishes connection with depth and RGB video server\n
@@ -49,6 +49,7 @@ class KUKA:
         :param ros: automatically lunches youbot_tl_tests on KUKA if true
         :param offline: toggles offline mode (doesn't try to connect to robot)
         :param read_depth: if false doesn't start depth client
+        :param camera_enable: enables mjpeg client if True
         """
         self.operating = True
         self.ip = ip
@@ -68,7 +69,9 @@ class KUKA:
         self.cam_depth = np.array([[[190, 70, 20]] * 640] * 480, dtype=np.uint8)
 
         # control
-        self.arm_pos = [0, 56, -80, -90, 0, 2]  # last sent arm position
+        self.arm_ID = 0
+        self.arm_pos = [[0, 56, -80, -90, 0, 2], [0, 56, -80, -90, 0, 2]]  # last sent arm position
+        self.arm_vel = [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]]
         self.body_target_pos = [0, 0, 0]  # current body target position
         self.going_to_target_pos = False
         self.move_speed = (0, 0, 0)  # last sent move speed
@@ -84,7 +87,7 @@ class KUKA:
         self.lidar_data = None
         self.increment_data_lidar = None  # the closest to lidar read increment value
         self.increment_data = None
-        self.corr_arm_pos = None
+        self.corr_arm_pos = [None, None]
 
         if offline:
             self.connected = False
@@ -126,15 +129,17 @@ class KUKA:
 
         # connecting to video server
         if self.connected:
-            if read_depth:
-                self.init_depth_client()
-            self.init_rgb_client()
+            if camera_enable:
+                if read_depth:
+                    self.init_depth_client()
+                self.init_rgb_client()
 
         # waiting for initial arm position
         if self.connected:
             debug("waiting for initial arm position")
-            self.corr_arm_pos = [0, 0, 0, 0, 0]
-            self.arm_pos[:-1] = self.corr_arm_pos
+            self.corr_arm_pos = [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]]
+            self.arm_pos[0][:-1] = self.corr_arm_pos[0]
+            self.arm_pos[1][:-1] = self.corr_arm_pos[1]
             # раскомментить, для ожтдания данных с руки
             # while not self.corr_arm_pos:
             #    time.sleep(0.1)
@@ -213,13 +218,12 @@ class KUKA:
             ssh_msg += ssh.recv(1).decode("utf-8")
             if ssh_msg.count("First ROS iter OK"):
                 debug("Streaming data")
+                time.sleep(10)
                 client.close()
                 return
         self.connected = False
         self.operating = False
         client.close()
-
-
 
     # receiving and parsing sensor data
 
@@ -257,6 +261,7 @@ class KUKA:
                     send_ind = 0
                 time.sleep(1 / self.frequency)
             if self.connected:
+                print(to_send)
                 self.conn.send(to_send)
             else:
                 debug(f"message:{to_send}")
@@ -271,7 +276,8 @@ class KUKA:
         """
         write_lidar = None
         write_increment = None
-        write_arm = None
+        write_arm1 = None
+        write_arm2 = None
         if data[:7] == ".laser#":
             raw = list(data[7:].split(';'))
             if len(raw) < 200:
@@ -290,13 +296,19 @@ class KUKA:
                 write_increment = list(map(float, data[6:].split(';')))
             except:
                 write_increment = None
-        elif data[:7] == ".manip#":
+        elif data[:8] == ".manip0#":
             try:
-                write_arm = list(map(float, data[7:].split(';')))
+                write_arm1 = list(map(float, data[8:].split(';')))
+
             except:
-                write_arm = None
+                write_arm1 = None
+        elif data[:8] == ".manip1#":
+            try:
+                write_arm2 = list(map(float, data[8:].split(';')))
+            except:
+                write_arm2 = None
         # update data
-        if write_lidar or write_increment or write_arm:
+        if write_lidar or write_increment or write_arm1 or write_arm2:
 
             self.data_lock.acquire()
             if write_lidar:
@@ -304,13 +316,22 @@ class KUKA:
                 self.increment_data_lidar = self.increment_data
             if write_increment:
                 self.increment_data = write_increment
-            if write_arm:
-                m1 = -write_arm[0] + 168
-                m2 = -write_arm[1] + 66
-                m3 = -write_arm[2] - 150
-                m4 = -write_arm[3] + 105
-                m5 = write_arm[4] - 166
-                self.corr_arm_pos = [m1, m2, m3, m4, m5]
+            if write_arm1:
+                arm_ID = 0  # затычка
+                m1 = -write_arm1[0] + 168
+                m2 = -write_arm1[1] + 66
+                m3 = -write_arm1[2] - 150
+                m4 = -write_arm1[3] + 105
+                m5 = write_arm1[4] - 166
+                self.corr_arm_pos[0] = [m1, m2, m3, m4, m5]
+            if write_arm2:
+                arm_ID = 0  # затычка
+                m1 = -write_arm2[0] + 168
+                m2 = -write_arm2[1] + 66
+                m3 = -write_arm2[2] - 150
+                m4 = -write_arm2[3] + 105
+                m5 = write_arm2[4] - 166
+                self.corr_arm_pos[1] = [m1, m2, m3, m4, m5]
             self.data_lock.release()
 
     def _receive_data(self):
@@ -357,7 +378,7 @@ class KUKA:
             return None, None
 
     @property
-    def arm(self):
+    def arm(self, /, arm_ID=0):
         """
         Acquires variable data lock and reads arm position
 
@@ -365,7 +386,8 @@ class KUKA:
         """
         if self.connected:
             self.data_lock.acquire()
-            out = self.corr_arm_pos
+
+            out = self.corr_arm_pos[arm_ID]
             self.data_lock.release()
             return out
         else:
@@ -506,38 +528,79 @@ class KUKA:
         (all joint parameters are in degrees from upright position)
         """
         grip = False
+
+        if list(kwargs.keys()).count("arm_ID") > 0:
+            self.arm_ID = kwargs["arm_ID"]
+        else:
+            self.arm_ID = 0
         if args:
-            self.arm_pos[:len(args)] = args
+            self.arm_pos[self.arm_ID][:len(args)] = args
             if len(args) == 6:
                 grip = True
         if list(kwargs.keys()).count("m1") > 0:
-            self.arm_pos[0] = kwargs["m1"]
+            self.arm_pos[self.arm_ID][0] = kwargs["m1"]
         if list(kwargs.keys()).count("m2") > 0:
-            self.arm_pos[1] = kwargs["m2"]
+            self.arm_pos[self.arm_ID][1] = kwargs["m2"]
         if list(kwargs.keys()).count("m3") > 0:
-            self.arm_pos[2] = kwargs["m3"]
+            self.arm_pos[self.arm_ID][2] = kwargs["m3"]
         if list(kwargs.keys()).count("m4") > 0:
-            self.arm_pos[3] = kwargs["m4"]
+            self.arm_pos[self.arm_ID][3] = kwargs["m4"]
         if list(kwargs.keys()).count("m5") > 0:
-            self.arm_pos[4] = kwargs["m5"]
+            self.arm_pos[self.arm_ID][4] = kwargs["m5"]
         if list(kwargs.keys()).count("grip") > 0:
-            self.arm_pos[5] = kwargs["grip"]
-            self.post_to_send_data(2, bytes(f'/grip:0;{self.arm_pos[5]}^^^', encoding='utf-8'))
+            self.arm_pos[self.arm_ID][5] = kwargs["grip"]
+            self.post_to_send_data(2, bytes(f'/grip:{self.arm_ID};{self.arm_pos[self.arm_ID][5]}^^^', encoding='utf-8'))
         if grip:
-            self.arm_pos[5] = args[-1]
-            self.post_to_send_data(2, bytes(f'/grip:0;{self.arm_pos[5]}^^^', encoding='utf-8'))
+            self.arm_pos[self.arm_ID][5] = args[-1]
+            self.post_to_send_data(2, bytes(f'/grip:{self.arm_ID};{self.arm_pos[self.arm_ID][5]}^^^', encoding='utf-8'))
 
         if list(kwargs.keys()).count("target") > 0:
             if len(kwargs["target"][0]) == 2:
                 m2, m3, m4, _ = self.solve_arm(kwargs["target"])
-                self.arm_pos[1:4] = m2, m3, m4
+                self.arm_pos[self.arm_ID][1:4] = m2, m3, m4
 
-        m1 = range_cut(11, 302, -self.arm_pos[0] + 168)
-        m2 = range_cut(3, 150, -self.arm_pos[1] + 66)
-        m3 = range_cut(-260, -15, -self.arm_pos[2] - 150)
-        m4 = range_cut(10, 195, -self.arm_pos[3] + 105)
-        m5 = range_cut(21, 292, self.arm_pos[4] + 166)
-        self.post_to_send_data(1, bytes(f'/arm:0;{m1};{m2};{m3};{m4};{m5}^^^', encoding='utf-8'))
+        m1 = range_cut(11, 302, -self.arm_pos[self.arm_ID][0] + 168)
+        m2 = range_cut(3, 150, -self.arm_pos[self.arm_ID][1] + 66)
+        m3 = range_cut(-260, -15, -self.arm_pos[self.arm_ID][2] - 150)
+        m4 = range_cut(10, 195, -self.arm_pos[self.arm_ID][3] + 105)
+        m5 = range_cut(21, 292, self.arm_pos[self.arm_ID][4] + 166)
+        self.post_to_send_data(1, bytes(f'/arm:{self.arm_ID};{m1};{m2};{m3};{m4};{m5}^^^', encoding='utf-8'))
+
+    def set_arm_vel(self, *args, **kwargs):
+        """
+        Sets arm velocities\n
+        ways to set arm velocities:\n
+        array of values: (joint 1, joint 2, joint 3, joint 4, joint 5)\n
+        by keywords:
+            m1, m2, m3, m4, m5 - for joints\n
+        (all joint parameters are in degrees/second)
+        """
+
+        if list(kwargs.keys()).count("arm_ID") > 0:
+            self.arm_ID = kwargs["arm_ID"]
+
+        if args:
+            self.arm_vel[self.arm_ID][:len(args)] = args
+
+        else:
+            self.arm_ID = 0
+        if list(kwargs.keys()).count("m1") > 0:
+            self.arm_vel[self.arm_ID][0] = kwargs["m1"]
+        if list(kwargs.keys()).count("m2") > 0:
+            self.arm_vel[self.arm_ID][1] = kwargs["m2"]
+        if list(kwargs.keys()).count("m3") > 0:
+            self.arm_vel[self.arm_ID][2] = kwargs["m3"]
+        if list(kwargs.keys()).count("m4") > 0:
+            self.arm_vel[self.arm_ID][3] = kwargs["m4"]
+        if list(kwargs.keys()).count("m5") > 0:
+            self.arm_vel[self.arm_ID][4] = kwargs["m5"]
+
+        m1 = range_cut(-90, 90, self.arm_vel[self.arm_ID][0])
+        m2 = range_cut(-90, 90, self.arm_vel[self.arm_ID][1])
+        m3 = range_cut(-90, 90, self.arm_vel[self.arm_ID][2])
+        m4 = range_cut(-90, 90, self.arm_vel[self.arm_ID][3])
+        m5 = range_cut(-90, 90, self.arm_vel[self.arm_ID][4])
+        self.post_to_send_data(1, bytes(f'/arm_vel:{self.arm_ID};{m1};{m2};{m3};{m4};{m5}^^^', encoding='utf-8'))
 
     # solve inverse kinetic
     def solve_arm(self, target, cartesian=False):
@@ -571,13 +634,13 @@ class KUKA:
                 elif -84 < m2_ang_neg < 63 and -135 < m3_ang_neg < 110 and -90 < m4_ang_neg < 95:
                     return m2_ang_neg, m3_ang_neg, m4_ang_neg, True
                 else:
-                    return *self.arm_pos[1:4], False
+                    return *self.arm_pos[self.arm_ID][1:4], False
                 # m2_ang = range_cut(-84, 63, m2_ang)
                 # m3_ang = range_cut(-135, 110, m3_ang)
                 # m4_ang = range_cut(-120, 90, m4_ang)
             except:
                 # debug("math error, out of range")
-                return *self.arm_pos[1:4], False
+                return *self.arm_pos[self.arm_ID][1:4], False
         else:  # (not tested, probably not working)
             x = target[0][0]
             y = target[0][1]
@@ -585,7 +648,7 @@ class KUKA:
             ang = target[1]
             xy = math.sqrt(x ** 2 + y ** 2)
             try:
-                self.arm_pos[0] = math.degrees(math.asin(x / xy))
+                self.arm_pos[self.arm_ID][0] = math.degrees(math.asin(x / xy))
                 z -= self.m4_len * math.sin(ang)
                 xy += self.m4_len * math.cos(ang)
                 fi = math.atan2(z, xy)
@@ -598,7 +661,7 @@ class KUKA:
                 return list(map(math.degrees, (m2_ang, m3_ang, ang - a - b - fi + math.pi / 2)))
             except:
                 debug("math error, out of range")
-                return self.arm_pos[1:4]
+                return self.arm_pos[self.arm_ID][1:4]
 
     # video capture
 

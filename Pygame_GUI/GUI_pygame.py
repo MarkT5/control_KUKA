@@ -77,6 +77,7 @@ class GuiControl:
         two buttons to change camera mode and six sliders to control arm
         """
         if self.robot.connected:
+
             while not self.robot.arm:
                 time.sleep(0.05)
             m1_ang, m2_ang, m3_ang, m4_ang, m5_ang, grip = *self.robot.arm, 0
@@ -84,7 +85,7 @@ class GuiControl:
             m1_ang, m2_ang, m3_ang, m4_ang, m5_ang, grip = 0, 0, 0, 0, 0, 0
         self.screen = Screen(1240, 780)
         Button(self.screen, x=750, y=700, width=100, height=50, color=(150, 255, 170), func=self.change_cam_mode)
-        Button(self.screen, x=900, y=700, width=100, height=50, color=(150, 255, 170), func=self.change_robot)
+        Button(self.screen, x=900, y=700, width=100, height=50, color=(150, 255, 170), func=self.print_arm)
         self.m1_slider = Slider(self.screen,
                                 min=-134, max=157, val=m1_ang,
                                 x=690, y=500,
@@ -133,6 +134,9 @@ class GuiControl:
                                font='serif',
                                font_size=30)
 
+
+    def print_arm(self, *args):
+        print(self.robot.arm_pos)
     def change_cam_mode(self, *args):
         """
         When called changes camera mode to different from current
@@ -384,7 +388,7 @@ class GuiControl:
         :return:
         """
         self.arm_screen = np.copy(self.arm_background)
-        m1_ang, m2_ang, m3_ang, m4_ang, m5_ang, grip = *map(math.radians, self.robot.arm_pos[:-1]), self.robot.arm_pos[
+        m1_ang, m2_ang, m3_ang, m4_ang, m5_ang, grip = *map(math.radians, self.robot.arm_pos[0][:-1]), self.robot.arm_pos[0][
             -1]
         color = (100, 100, 255)
 
@@ -435,7 +439,7 @@ class GuiControl:
             self.robot.move_arm(target=self.target)
         else:
             color = ((100, 255, 100) if available else (240, 100, 100))
-        m1_ang, m2_ang, m3_ang, m4_ang, m5_ang, grip = self.robot.arm_pos
+        m1_ang, m2_ang, m3_ang, m4_ang, m5_ang, grip = self.robot.arm_pos[0]
         self.m1_slider.set_val(m1_ang)
         self.m2_slider.set_val(m2_ang)
         self.m3_slider.set_val(m3_ang)

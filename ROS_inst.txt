@@ -52,7 +52,6 @@ sudo apt install ros-kinetic-openni* -y
 sudo apt install ros-kinetic-web-video-server -y
 sudo apt install ros-kinetic-robot-state-publisher -y
 
-sudo apt install ros-kinetic-joint-state-publisher -y
 
 
 
