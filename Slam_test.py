@@ -89,12 +89,7 @@ def best_fit_transform(A, B):
     centroid_B = np.mean(B, axis=0)
     AA = A - centroid_A
     BB = B - centroid_B
-    #pyplot.plot([p[0] for p in AA], [p[1] for p in AA], 'o', label='AA')
-    #pyplot.plot([p[0] for p in BB], [p[1] for p in BB], 'o', label='BB')
 
-    #pyplot.axis('equal')
-    #pyplot.legend(numpoints=1)
-    #pyplot.show()
     # rotation matrix
     H = np.dot(AA.T, BB)
     U, S, Vt = np.linalg.svd(H)
@@ -129,18 +124,7 @@ def icp(A, B, init_pose=None, max_iterations=20, tolerance=0.01):
     # assert A.shape == B.shape
     # get number of dimensions
     n, m = A.shape
-    #temp
-    #nb, mb = B.shape
-    #n = min(n, nb)
-    #B = np.copy(B[:n, :])
-    #A = np.copy(A[:n, :])
-    #pyplot.plot([p[0] for p in A], [p[1] for p in A], 'o', label='A')
-    #pyplot.plot([p[0] for p in B], [p[1] for p in B], 'o', label='B')
 
-    #pyplot.axis('equal')
-    #pyplot.legend(numpoints=1)
-    #pyplot.show()
-    #
 
     # make points homogeneous, copy them to maintain the originals
     src = np.ones((m + 1, A.shape[0]))
@@ -173,20 +157,6 @@ def icp(A, B, init_pose=None, max_iterations=20, tolerance=0.01):
             break
 
         prev_error = mean_error
-        #if i // 3 == 0:
-            # display
-            #converted = np.dot(T, src)
-
-            # back from homogeneous to cartesian
-            #converted = np.array(converted[:converted.shape[1], :]).T
-
-            #pyplot.plot([p[0] for p in converted], [p[1] for p in converted], 'o', label='converted iter {}'.format(i))
-    # calculate final transformation
-    # pyplot.plot([p[0] for p in B], [p[1] for p in B], 'o', label='B')
-
-    # pyplot.axis('equal')
-    # pyplot.legend(numpoints=1)
-    # pyplot.show()
     T, _, _ = best_fit_transform(A, src[:m, :].T)
 
     return T, distances, i, mean_error
@@ -403,7 +373,7 @@ def find_corners(object, approx_points_ind):
     a_prev = None
     ang_curr = None
     ang_prev = None
-    offset = 0.1
+    offset = 0.4
     corner = []
     corner_lines = []
     for i in range(1, len(connection_coords)):

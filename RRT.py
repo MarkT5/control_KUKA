@@ -116,6 +116,7 @@ class RRT:
                 if self.node_map[(*pos, i)] != -1:
                     self.node_neighbours.append(self.node_map[(*pos, i)])
 
+    #переписать на KDtree
     def check_node_region(self, new_node):
         node_neighbours = []
         nodes_copy = np.copy(self.nodes)

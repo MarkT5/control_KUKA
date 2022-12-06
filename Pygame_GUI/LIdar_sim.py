@@ -46,8 +46,10 @@ class Lidar_sim:
 
         # for slam:
         self.last_odom = [0, 0, 0]
-        self.pose_graph = {1: [[0, 0, 0], None]}
-        self.node_num = 1
+        self.pose_graph = {0: [[0, 0, 0], None, None, []]} #odom, object, lidar, children[child id, edge id]]
+        self.edges = np.array([])
+        self.edge_num = 0
+        self.node_num = 0
         self.nodes_coords = np.array(False)
 
     def init_pygame(self):
@@ -109,6 +111,37 @@ class Lidar_sim:
             self.screen.step()
             self.clock.tick(6)
 
+    def homogen_matrix_from_odom(self, odom):
+        x, y, rot = odom
+        rot = rot - math.pi / 2
+        robot_rad = 0.3
+        X = np.array([[1, 0, x],
+                      [0, 1, y],
+                      [0, 0, 1]])
+
+        f = np.array([[1, 0, 0],
+                      [0, 1, robot_rad],
+                      [0, 0, 1]])
+
+        rot = np.array([[math.cos(rot), -math.sin(rot), 0],
+                          [math.sin(rot), math.cos(rot), 0],
+                          [0, 0, 1]])
+
+        X = np.dot(X, np.dot(rot, f))
+        return X
+
+
+    def add_edge(self, from_n, to_n):
+        print(from_n, to_n)
+        A = np.linalg.inv(self.homogen_matrix_from_odom(from_n))
+        B = self.homogen_matrix_from_odom(to_n)
+        if self.edge_num > 0:
+            self.edge = np.append(self.edge, [np.dot(A, B)], axis=0)
+            print(self.edge)
+            self.edge_num+=1
+        else:
+            self.edge = np.array([np.dot(A, B)])
+            self.edge_num+=1
     def draw_line_from_point_cloud(self, object, color=(255,255,255)):
         approx_points = douglas_peucker(object)[0]
         connection_coords = [[object[p][0], object[p][1]] for p in approx_points]
@@ -119,54 +152,59 @@ class Lidar_sim:
         self.draw_line_from_point_cloud(object)
         approx_points_ind, _ = douglas_peucker(object)
         corners, corner_lines = find_corners(object, approx_points_ind)
-
         x, y, r = self.odom
         xo, yo, ro = self.last_odom
-        if corners and (math.sqrt((x-xo)**2+(y-yo)**2) > 0.3 or abs(r-ro) > 0.5 or self.node_num == 1):
-            corners = sorted(corners, key=lambda x: len(x[0]), reverse=True)
-            object = np.array(corners[0][0])
-            self.pose_graph[self.node_num] = [self.odom, object]
-            if self.node_num == 1:
+        if math.sqrt((x-xo)**2+(y-yo)**2) > 0.3 or abs(r-ro) > 0.5 or self.node_num == 0:
+            if self.node_num == 0:
                 self.nodes_coords = (np.array([self.odom]))
+                self.pose_graph[self.node_num] = [self.odom, None, self.lidar, []]
+            elif not corners:
+                self.pose_graph[self.node_num] = [self.odom, None, self.lidar, []]
+                self.pose_graph[self.node_num-1][3].append([self.node_num, self.edge_num])
+                self.add_edge(self.pose_graph[self.node_num-1][0], self.odom)
             else:
+                corners = sorted(corners, key=lambda x: x[1], reverse=True)
+                object = np.array(corners[0][0])
+                self.pose_graph[self.node_num] = [self.odom, object, self.lidar, []]
+                _, cl_points = self.find_n_closest(self.odom, min(5, self.node_num))
                 self.nodes_coords = np.append(self.nodes_coords, [self.odom], axis=0)
-                _, cl_num = self.find_closest(self.odom)
+                if isinstance(cl_points, int):
+                    cl_points = [cl_points]
+                for nn in cl_points:
+                    if isinstance(self.pose_graph[nn][1], np.ndarray):
+                        icp_out = icp(object, np.array(self.pose_graph[nn][1]))
+                        #draw icp
+                        if icp_out[-1] and icp_out[-1] < 0.3:
+                            self.pose_graph[nn][3].append([self.node_num, self.edge_num])
+                            self.add_edge(self.pose_graph[nn][0], self.odom)
+                            self.draw_line_from_point_cloud(object, (0, 255, 0))
+                            self.draw_line_from_point_cloud(self.pose_graph[nn][1], (0, 0, 255))
+                            self.screen.step()
+                            self.clock.tick(6)
+                            pyplot.plot([p[0] for p in object], [p[1] for p in object], 'o', label='points 2')
 
-                for nn in range(1, self.node_num-1):
-                    icp_out = icp(object, np.array(self.pose_graph[nn][1]))
+                            # to homogeneous
+                            converted = np.ones((object.shape[1] + 1, object.shape[0]))
+                            converted[:object.shape[1], :] = np.copy(object.T)
+                            # transform
+                            converted = np.dot(icp_out[0], converted)
+                            # back from homogeneous to cartesian
+                            converted = np.array(converted[:converted.shape[1], :]).T
+                            pyplot.plot([p[0] for p in converted], [p[1] for p in converted], 'o', label='converted')
+                            pyplot.plot([p[0] for p in self.pose_graph[nn][1]], [p[1] for p in self.pose_graph[nn][1]], '.', label='points 1')
 
-                    #draw icp
-                    if icp_out[-1] and icp_out[-1] < 0.5:
-                        self.draw_line_from_point_cloud(object, (0, 255, 0))
-                        self.draw_line_from_point_cloud(self.pose_graph[nn][1], (0, 0, 255))
-                        self.screen.step()
-                        self.clock.tick(6)
-                        print(icp_out[-1])
-                        pyplot.plot([p[0] for p in object], [p[1] for p in object], 'o', label='points 2')
-
-                        # to homogeneous
-                        converted = np.ones((object.shape[1] + 1, object.shape[0]))
-                        converted[:object.shape[1], :] = np.copy(object.T)
-                        # transform
-                        converted = np.dot(icp_out[0], converted)
-                        # back from homogeneous to cartesian
-                        converted = np.array(converted[:converted.shape[1], :]).T
-                        pyplot.plot([p[0] for p in converted], [p[1] for p in converted], 'o', label='converted')
-                        pyplot.plot([p[0] for p in self.pose_graph[nn][1]], [p[1] for p in self.pose_graph[nn][1]], '.', label='points 1')
-
-                        pyplot.axis('equal')
-                        pyplot.legend(numpoints=1)
-                        pyplot.show()
+                            pyplot.axis('equal')
+                            pyplot.legend(numpoints=1)
+                            pyplot.show()
             self.last_odom = self.odom
             self.node_num += 1
 
-    def find_closest(self, point, node_arr=np.array(False)):
+    def find_n_closest(self, point, n):
+        node_arr = self.nodes_coords
         if not node_arr.any():
-            node_arr = self.nodes_coords
-        else:
-            return None
+            return None, None
         nodes_tree = scipy.spatial.cKDTree(node_arr)
-        return nodes_tree.query(point)
+        return nodes_tree.query(point, n)
 
     def update_keys(self):
         """
