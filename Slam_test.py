@@ -78,19 +78,23 @@ def conv_cil_to_dec(input, ind=None):
     return out_points
 
 
-def best_fit_transform(A, B, cornerA_ind, cornerB_ind):
+def best_fit_transform(A, B):
     # assert A.shape == B.shape
 
     # get number of dimensions
     n, m = A.shape
+
     # translate points to their centroids
-    weights = np.concatenate((np.array(range(0, cornerA_ind))**4, np.array(range(n, cornerA_ind, -1))**4))
-    weights_sum = np.sum(weights)
-    weights = np.diag(weights)
-    centroid_A = np.sum(np.dot(weights, A), axis=0) / weights_sum
-    centroid_B = np.sum(np.dot(weights, B), axis=0) / weights_sum
+    centroid_A = np.mean(A, axis=0)
+    centroid_B = np.mean(B, axis=0)
     AA = A - centroid_A
     BB = B - centroid_B
+    #pyplot.plot([p[0] for p in AA], [p[1] for p in AA], 'o', label='AA')
+    #pyplot.plot([p[0] for p in BB], [p[1] for p in BB], 'o', label='BB')
+
+    #pyplot.axis('equal')
+    #pyplot.legend(numpoints=1)
+    #pyplot.show()
     # rotation matrix
     H = np.dot(AA.T, BB)
     U, S, Vt = np.linalg.svd(H)
@@ -120,14 +124,23 @@ def nearest_neighbor(src, dst):
     return dist.ravel(), indexes.ravel()
 
 
-def icp(A, B, cornerA_ind, cornerB_ind, init_pose=None, max_iterations=20, tolerance=0.01):
-    print(A.shape, B.shape)
+def icp(A, B, init_pose=None, max_iterations=20, tolerance=0.01):
+    # print(A.shape, B.shape)
     # assert A.shape == B.shape
-    cornerA = A[cornerA_ind]
-    cornerB = B[cornerB_ind]
     # get number of dimensions
-    m = A.shape[1]
+    n, m = A.shape
+    #temp
+    #nb, mb = B.shape
+    #n = min(n, nb)
+    #B = np.copy(B[:n, :])
+    #A = np.copy(A[:n, :])
+    #pyplot.plot([p[0] for p in A], [p[1] for p in A], 'o', label='A')
+    #pyplot.plot([p[0] for p in B], [p[1] for p in B], 'o', label='B')
 
+    #pyplot.axis('equal')
+    #pyplot.legend(numpoints=1)
+    #pyplot.show()
+    #
 
     # make points homogeneous, copy them to maintain the originals
     src = np.ones((m + 1, A.shape[0]))
@@ -148,7 +161,7 @@ def icp(A, B, cornerA_ind, cornerB_ind, init_pose=None, max_iterations=20, toler
         distances, indices = nearest_neighbor(src[:m, :].T, dst[:m, :].T)
 
         # compute the transformation between the current source and nearest destination points
-        T, _, _ = best_fit_transform(src[:m, :].T, dst[:m, indices].T, cornerA_ind, cornerB_ind)
+        T, _, _ = best_fit_transform(src[:m, :].T, dst[:m, indices].T)
 
         # update the current source
         src = np.dot(T, src)
@@ -156,15 +169,27 @@ def icp(A, B, cornerA_ind, cornerB_ind, init_pose=None, max_iterations=20, toler
         # check error
         mean_error = np.mean(distances)
         if np.abs(prev_error - mean_error) < tolerance:
-            error = np.abs(prev_error - mean_error)
+            tolerance_error = np.abs(prev_error - mean_error)
             break
 
         prev_error = mean_error
+        #if i // 3 == 0:
+            # display
+            #converted = np.dot(T, src)
 
+            # back from homogeneous to cartesian
+            #converted = np.array(converted[:converted.shape[1], :]).T
+
+            #pyplot.plot([p[0] for p in converted], [p[1] for p in converted], 'o', label='converted iter {}'.format(i))
     # calculate final transformation
-    T, _, _ = best_fit_transform(A, src[:m, :].T, cornerA_ind, cornerB_ind)
+    # pyplot.plot([p[0] for p in B], [p[1] for p in B], 'o', label='B')
 
-    return T, distances, i, error
+    # pyplot.axis('equal')
+    # pyplot.legend(numpoints=1)
+    # pyplot.show()
+    T, _, _ = best_fit_transform(A, src[:m, :].T)
+
+    return T, distances, i, mean_error
 
 
 def split_objects(data):
