@@ -24,12 +24,14 @@ class Button:
                  height=10,
                  func=lambda *args: args,
                  color=(100, 100, 100)):
-        self.par_surf = par_surf
+
         self.func = func
-        self.x = x
-        self.y = y
-        self.width = width
-        self.height = height
+        self.par_surf = par_surf
+        self.ps_width, self.ps_height = par_surf.width, par_surf.height
+        self.x = int(x * self.ps_width)
+        self.y = int(y * self.ps_height)
+        self.width = int(width * self.ps_width)
+        self.height = int(height * self.ps_height)
         self.color = color
         self.surf = pg.Surface((self.width, self.height))
         self.surf.fill(self.color)
@@ -57,14 +59,15 @@ class Text:
                  font_size=10,
                  func=lambda *args: args,
                  color=(255, 255, 255)):
-        self.par_surf = par_surf
         self.func = func
-        self.x = x
-        self.y = y
+        self.par_surf = par_surf
+        self.ps_width, self.ps_height = par_surf.width, par_surf.height
+        self.x = int(x * self.ps_width)
+        self.y = int(y * self.ps_height)
         self.inp_text = inp_text
         self.text = inp_text
         self.color = color
-        self.text = pg.font.SysFont(font, font_size)
+        self.text = pg.font.SysFont(font, int(100 * font_size * self.ps_height))
         self.surf = self.text.render(self.inp_text(), False, self.color)
         self.rect = par_surf.add_object(self)
 
@@ -96,10 +99,11 @@ class Slider:
 
         self.par_surf = par_surf
         self.func = func
-        self.x = x
-        self.y = y
-        self.width = width
-        self.height = height
+        self.ps_width, self.ps_height = par_surf.width, par_surf.height
+        self.x = int(x * self.ps_width)
+        self.y = int(y * self.ps_height)
+        self.width = int(width * self.ps_width)
+        self.height = int(height * self.ps_height)
         self.color = color
         self.slider_color = slider_color
         self.min = min
@@ -147,16 +151,17 @@ class Mat:
                  y=0,
                  cv_mat_stream=None):
         self.par_surf = par_surf
-        self.x = 0
-        self.y = 0
+        self.ps_width, self.ps_height = par_surf.width, par_surf.height
+        self.x = int(x * self.ps_width)
+        self.y = int(y * self.ps_height)
+        #self.width = int(width * self.ps_width)
+        #self.height = int(height * self.ps_height)
         self.func = lambda *args: args
         self.is_mat_stream = False
         self.last_hover_pos = (0, 0)
         self.is_pressed = False
 
         self.func = func
-        self.x = x
-        self.y = y
 
         if cv_mat_stream:
             self.cv_mat_stream = cv_mat_stream

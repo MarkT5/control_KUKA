@@ -5,6 +5,7 @@ class Screen:
         pg.init()
         self.running = True
         self.objects = []
+        self.width, self.height = width, height
         self.screen = pg.display.set_mode((width, height))
         self.pressed_obj_ind = None
         self.fps = 24
