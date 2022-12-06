@@ -22,7 +22,7 @@ class MapPlotter:
         if not robot:
             self.from_log()
         if log_data:
-            self.log_file = open("lidar_odom_log/lidar_odom_log_9.txt", "a")
+            self.log_file = open("lidar_odom_log/lidar_odom_log_12.txt", "a")
 
     def from_log(self):
         f = open("lidar_odom_log/lidar_odom_log_7.txt", "r")
@@ -51,7 +51,7 @@ class MapPlotter:
         running = True
         while running and self.robot.operating:
             if self.show_map:
-                running = cv2.waitKey(120) != 27
+                running = cv2.waitKey(600) != 27
             if self.robot:
                 pos, lidar = self.robot.lidar
             else:
@@ -62,9 +62,10 @@ class MapPlotter:
                 continue
             x, y, ang = pos
             self.pos = pos
-
-            if log_data:
+            time += 1
+            if log_data and time == 5:
                 self.log_file.write(", ".join(map(str, pos)) + "; " + ", ".join(map(str, lidar)) + "\n")
+                time = 0
                 continue
 
             cent_y, cent_x = y, x
