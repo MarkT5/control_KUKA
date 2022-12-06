@@ -35,7 +35,7 @@ class GuiControl:
         self.height = height
 
         # arm window settings
-        self.cylindrical_scale = (4 * self.height)/10000
+        self.cylindrical_scale = (1 / self.height)*1000
         self.arm_width = int(0.4839*self.width)
         self.arm_height = int(self.height*0.6154)
         self.start_point_x = int(self.arm_width // 2 - 30 / self.cylindrical_scale)
@@ -129,12 +129,12 @@ class GuiControl:
                                x=0.024, y=0.949,
                                inp_text=self.output_pos_text_x,
                                font='serif',
-                               font_size=0.024)
+                               font_size=10)
         self.pos_text_y = Text(self.screen,
                                x=0.105, y=0.949,
                                inp_text=self.output_pos_text_y,
                                font='serif',
-                               font_size=0.024)
+                               font_size=10)
 
     def print_arm(self, *args):
         print(self.robot.arm_pos)

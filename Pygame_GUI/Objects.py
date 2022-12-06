@@ -67,7 +67,7 @@ class Text:
         self.inp_text = inp_text
         self.text = inp_text
         self.color = color
-        self.text = pg.font.SysFont(font, int(100 * font_size * self.ps_height))
+        self.text = pg.font.SysFont(font, int(font_size * self.ps_height/500))
         self.surf = self.text.render(self.inp_text(), False, self.color)
         self.rect = par_surf.add_object(self)
 
