@@ -263,7 +263,7 @@ class RRT_sim:
         pg.quit()
 
 
-robot = KUKA('192.168.88.25', ros=False, offline=False)
+robot = KUKA('192.168.88.21', ros=False, offline=False)
 
 new_map = MapPlotter(robot)
 map_thr = thr.Thread(target=new_map.create_map, args=())

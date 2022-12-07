@@ -17,8 +17,7 @@ nano /etc/ssh/sshd_config
 PermitRootLogin yes
 
 
-ifdown -s
-ifup -a
+ifdown -a && ifup -a
 
 
 sudo apt-get update -y
@@ -59,18 +58,27 @@ nano /opt/ros/kinetic/share/youbot_driver/config/youbot-ethercat.cfg
 Значение EthernetDevice c eth0 на ens36
 
 
-nano ~/.bashrc
-в самом низу после source
-source /home/youbot/catkin_ws/devel/setup.bash
+
 
 sudo nano /etc/openni/GlobalDefaults.ini
 раскоментить UsbInterface=2
 перезапустить
 
+сначала
+
+source ./opt/ros/kinetic/setup.bash
 
 cd ~/catkin_ws
 catkin_make
-scp -r "/home/ubuntu/ZaSKaR/youbot_tl_test" "root@192.168.88.25:/home/youbot/catkin_ws/src/youbot_tl_test/"
-scp -r "/home/ubuntu/ZaSKaR/hokuyo_node" "root@192.168.88.25:/home/youbot/catkin_ws/src/hokuyo_node"
+
+nano ~/.bashrc
+в самом низу после source
+source /home/youbot/catkin_ws/devel/setup.bash
+
+cd ~/catkin_ws
 catkin_make
+scp -r "/home/ubuntu/ZaSKaR/youbot_tl_test" "root@192.168.88.23:/home/youbot/catkin_ws/src/youbot_tl_test/"
+scp -r "/home/ubuntu/ZaSKaR/hokuyo_node" "root@192.168.88.23:/home/youbot/catkin_ws/src/hokuyo_node"
+catkin_make
+#here execute full reboot
 roslaunch youbot_tl_test ytl.launch

@@ -3,11 +3,12 @@ import math
 import cv2
 import numpy as np
 
-log_data = False
+log_data = True
+from KUKA import KUKA
 
 
 class MapPlotter:
-    def __init__(self, robot=None, width=300, map_size=200, show_map=True):
+    def __init__(self, robot=None, width=300, map_size=200, show_map=False):
         self.robot = robot
         self.show_map = show_map
         self.map_size = map_size
@@ -18,11 +19,11 @@ class MapPlotter:
         self.cent_x = map_size // 2
         self.cent_y = map_size // 2
         self.discrete = 20
-        self.pos = (0,0,0)
+        self.pos = (0, 0, 0)
         if not robot:
             self.from_log()
         if log_data:
-            self.log_file = open("lidar_odom_log/lidar_odom_log_12.txt", "a")
+            self.log_file = open("lidar_odom_log/lidar_odom_log_14.txt", "a")
 
     def from_log(self):
         f = open("lidar_odom_log/lidar_odom_log_7.txt", "r")
@@ -47,7 +48,7 @@ class MapPlotter:
         return (-self.map_size / 2 + x) / self.discrete, -(y - self.map_size / 2) / self.discrete
 
     def create_map(self):
-        time = 0
+        old_odom = [-1000, -1000, -1000]
         running = True
         while running and self.robot.operating:
             if self.show_map:
@@ -55,28 +56,29 @@ class MapPlotter:
             if self.robot:
                 pos, lidar = self.robot.lidar
             else:
-                if self.log_data_ind < len(self.log_data)-1:
+                if self.log_data_ind < len(self.log_data) - 1:
                     pos, lidar = self.log_data[self.log_data_ind]
-                    self.log_data_ind+=1
+                    self.log_data_ind += 1
             if not pos or not lidar:
                 continue
             x, y, ang = pos
+            xo, yo, ango = old_odom
             self.pos = pos
-            time += 1
-            if log_data and time == 5:
+            if log_data and (math.sqrt((x - xo) ** 2 + (y - yo) ** 2) > 0.6 or abs(ang - ango) > 0.1):
                 self.log_file.write(", ".join(map(str, pos)) + "; " + ", ".join(map(str, lidar)) + "\n")
-                time = 0
+                old_odom = pos
+                print("log")
                 continue
 
             cent_y, cent_x = y, x
             cent_y = cent_y - 0.3 * math.cos(ang + math.pi / 2)
             cent_x = cent_x + 0.3 * math.sin(ang + math.pi / 2)
 
-            for i in range(40, len(lidar)-40):
+            for i in range(40, len(lidar) - 40):
                 lid_ang = i * math.radians(240) / len(lidar) - ang - math.radians(30)
                 lid_dist = lidar[i]
 
-                if lid_dist > 5:
+                if lid_dist > 5 or lid_dist < 0.4:
                     continue
                 for lid_dist_cl in range(int(self.discrete * lid_dist)):
                     ox = cent_x + lid_dist_cl / self.discrete * math.sin(lid_ang)
@@ -100,3 +102,8 @@ class MapPlotter:
         if log_data:
             self.log_file.close()
 
+
+if __name__ == "__main__":
+    robot = KUKA('192.168.88.21', ros=False, offline=False, read_depth=False, camera_enable=False)
+    mp = MapPlotter(robot)
+    mp.create_map()

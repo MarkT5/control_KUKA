@@ -22,7 +22,6 @@ class Lidar_sim:
         self.body_pos_screen = np.copy(self.body_pos_background)
 
         self.move_body_scale = 60
-        self.line_scale = self.move_body_scale / discrete
         self.wall_lines = []
         self.pause = False
         self.space_clk = False
@@ -46,7 +45,7 @@ class Lidar_sim:
 
         # for slam:
         self.last_odom = [0, 0, 0]
-        self.pose_graph = {0: [[0, 0, 0], None, None, []]} #odom, object, lidar, children[child id, edge id]]
+        self.pose_graph = {0: [[0, 0, 0], None, None, []]}  # odom, object, lidar, children[child id, edge id]]
         self.edges = np.array([])
         self.edge_num = 0
         self.node_num = 0
@@ -57,7 +56,7 @@ class Lidar_sim:
         Initialises PyGame and precreated pygame objects:
         two buttons to change camera mode and six sliders to control arm
         """
-        self.screen = Screen(self.width, self.width*1.09)
+        self.screen = Screen(self.width, self.width * 1.09)
         self.body_pos_pygame = Mat(self.screen, x=0, y=0, cv_mat_stream=self.body_pos_stream)
         self.clock = pg.time.Clock()
 
@@ -109,7 +108,7 @@ class Lidar_sim:
                 self.process_SLAM()
 
             self.screen.step()
-            self.clock.tick(6)
+            self.clock.tick(9)
 
     def homogen_matrix_from_odom(self, odom):
         x, y, rot = odom
@@ -124,47 +123,102 @@ class Lidar_sim:
                       [0, 0, 1]])
 
         rot = np.array([[math.cos(rot), -math.sin(rot), 0],
-                          [math.sin(rot), math.cos(rot), 0],
-                          [0, 0, 1]])
+                        [math.sin(rot), math.cos(rot), 0],
+                        [0, 0, 1]])
 
         X = np.dot(X, np.dot(rot, f))
         return X
 
-
     def add_edge(self, from_n, to_n):
-        print(from_n, to_n)
-        A = np.linalg.inv(self.homogen_matrix_from_odom(from_n))
-        B = self.homogen_matrix_from_odom(to_n)
+        #print("from:", from_n)
+        #print("to:", to_n)
+        if isinstance(from_n, np.ndarray):
+            A = np.linalg.inv(from_n)
+        else:
+            A = np.linalg.inv(self.homogen_matrix_from_odom(from_n))
+        if isinstance(to_n, np.ndarray):
+            B = np.copy(to_n)
+        else:
+            B = self.homogen_matrix_from_odom(to_n)
         if self.edge_num > 0:
             self.edge = np.append(self.edge, [np.dot(A, B)], axis=0)
-            print(self.edge)
-            self.edge_num+=1
+            self.edge_num += 1
         else:
             self.edge = np.array([np.dot(A, B)])
-            self.edge_num+=1
-    def draw_line_from_point_cloud(self, object, color=(255,255,255)):
-        approx_points = douglas_peucker(object)[0]
-        connection_coords = [[object[p][0], object[p][1]] for p in approx_points]
-        self.draw_wall_line(connection_coords, color)
+            self.edge_num += 1
+        #print(np.dot(A, B))
+
+    def draw_line_from_point_cloud(self, object, color=(255, 255, 255)):
+        approx_points = douglas_peucker(object, True)[0]
+        connection_coords = [[int(self.width // 2 + object[p][1]*self.move_body_scale),
+                              int(self.width // 2 - object[p][0]*self.move_body_scale)] for p in approx_points]
+        #connection_coords = [
+        #    [int(p[1]),
+        #     int(p[0])]
+        #   for p in connection_coords]
+        for dot in range(1, len(connection_coords)):
+            cv2.line(self.body_pos_screen, connection_coords[dot - 1], connection_coords[dot], color,
+                     max(1, int(0.05 * self.move_body_scale)))
+
+    def generate_weight_vector(self, src):
+        ind = src[0]
+        w = src[1]
+        out = []
+        print(src)
+        curr = 0
+        step = w[0] / (ind[1] - ind[0])
+        for a in range(0, ind[1] - ind[0]):
+            out.append(int(curr))
+            curr += step
+        for i in range(2, len(ind)-1):
+            step = -2*w[i - 2] / (ind[i] - ind[i-1])
+            curr = w[i - 2] - step
+            for a in range(0, (ind[i] - ind[i-1]) // 2):
+                out.append(int(curr))
+                curr += step
+            curr = 0
+            step = 2*w[i-1] / (ind[i] - ind[i-1])
+            for a in range(0, (ind[i] - ind[i - 1])//2):
+                out.append(int(curr))
+                curr += step
+            if (ind[i] - ind[i-1]) % 2 == 1:
+                out.append(int(curr))
+        step = -w[-1] / (ind[-1] - ind[-2])
+        curr = w[-1] - step
+        for a in range(0, (ind[-1] - ind[-2])):
+            out.append(int(curr))
+            curr += step
+        return out
+
+
     def process_SLAM(self):
         object_coords = split_objects(self.log_data[self.log_data_ind])
         object = object_coords[0]
+        #scaled_odom = [*scle_to_arr(*self.odom[:2]), self.odom[2]]
+        #print(scaled_odom, self.odom)
         self.draw_line_from_point_cloud(object)
-        approx_points_ind, _ = douglas_peucker(object)
-        corners, corner_lines = find_corners(object, approx_points_ind)
+        peaks = douglas_peucker(object, True)
+        corners, corner_lines = find_corners(object, peaks[0])
         x, y, r = self.odom
         xo, yo, ro = self.last_odom
-        if math.sqrt((x-xo)**2+(y-yo)**2) > 0.3 or abs(r-ro) > 0.5 or self.node_num == 0:
+        if math.sqrt((x - xo) ** 2 + (y - yo) ** 2) > 0.01 or abs(r - ro) > 0.5 or self.node_num == 0:
             if self.node_num == 0:
                 self.nodes_coords = (np.array([self.odom]))
                 self.pose_graph[self.node_num] = [self.odom, None, self.lidar, []]
             elif not corners:
                 self.pose_graph[self.node_num] = [self.odom, None, self.lidar, []]
-                self.pose_graph[self.node_num-1][3].append([self.node_num, self.edge_num])
-                self.add_edge(self.pose_graph[self.node_num-1][0], self.odom)
+                self.pose_graph[self.node_num - 1][3].append([self.node_num, self.edge_num])
+                self.add_edge(self.pose_graph[self.node_num - 1][0], self.odom)
+                #pyplot.plot(*zip(self.odom[:2]), 'o', label=f'robot1- ang: {self.odom[2]}')
+                #pyplot.plot(*zip(self.pose_graph[self.node_num - 1][0][:2]), 'o', label=f'robot2- ang: {self.pose_graph[self.node_num - 1][0][2]}')
+                #pyplot.axis('equal')
+                #pyplot.legend(numpoints=1)
+                #pyplot.show()
             else:
                 corners = sorted(corners, key=lambda x: x[1], reverse=True)
-                object = np.array(corners[0][0])
+
+                #object = np.array(corners[0][0])
+                object = np.array(object_coords[0])
                 self.pose_graph[self.node_num] = [self.odom, object, self.lidar, []]
                 _, cl_points = self.find_n_closest(self.odom, min(5, self.node_num))
                 self.nodes_coords = np.append(self.nodes_coords, [self.odom], axis=0)
@@ -172,15 +226,48 @@ class Lidar_sim:
                     cl_points = [cl_points]
                 for nn in cl_points:
                     if isinstance(self.pose_graph[nn][1], np.ndarray):
-                        icp_out = icp(object, np.array(self.pose_graph[nn][1]))
-                        #draw icp
-                        if icp_out[-1] and icp_out[-1] < 0.3:
+                        weight_vector = self.generate_weight_vector(peaks)
+                        print(len(weight_vector))
+                        print(len(object[peaks[0][0]:peaks[0][-1]]))
+                        icp_out = icp(object[peaks[0][0]:peaks[0][-1]], np.array(self.pose_graph[nn][1]), weight_vector=[weight_vector])
+                        # draw icp
+                        if icp_out[-1] and icp_out[-1] < 0.1:
+                            print(icp_out[-1])
                             self.pose_graph[nn][3].append([self.node_num, self.edge_num])
-                            self.add_edge(self.pose_graph[nn][0], self.odom)
-                            self.draw_line_from_point_cloud(object, (0, 255, 0))
-                            self.draw_line_from_point_cloud(self.pose_graph[nn][1], (0, 0, 255))
+                            mat_odom = self.homogen_matrix_from_odom(self.odom)
+                            T = np.copy(icp_out[0])
+                            #print("T:", T)
+                            mat_odom_rot = mat_odom[:2, :2]
+                            mat_odom_t = mat_odom[:2, 2]
+                            T_rot = T[:2, :2]
+                            T_t = T[:2, 2] / T[2, 2]
+                            mat_odom_rot = np.dot(mat_odom_rot, T_rot)
+                            mat_odom_t = mat_odom_t + T_t
+                            corrected_odom = np.eye(3)
+                            corrected_odom[:2, :2] = mat_odom_rot
+                            corrected_odom[:2, 2] = T_t
+
+
+                            #pyplot.figure(1)
+                            #pyplot.subplot()
+
+                            #pyplot.plot(*zip(self.odom[:2]), 'o', label=f'robot1- ang: {self.odom[2]}')
+                            #pyplot.plot(*zip(corrected_odom[:2, 2]), 'o', label=f'robot_c- ang: {math.acos(corrected_odom[0, 0])}')
+                            #pyplot.plot(*zip(self.pose_graph[nn][0][:2]), 'o',
+                            #            label=f'robot2- ang: {self.pose_graph[nn][0][2]}')
+                            #pyplot.axis('equal')
+                            #pyplot.legend(numpoints=1)
+
+
+                            self.add_edge(self.pose_graph[nn][0], corrected_odom)
+                            #self.draw_line_from_point_cloud(object, (0, 255, 0))
+                            #self.draw_line_from_point_cloud(self.pose_graph[nn][1], (0, 0, 255))
                             self.screen.step()
                             self.clock.tick(6)
+
+
+                            pyplot.figure(2)
+                            pyplot.subplot()
                             pyplot.plot([p[0] for p in object], [p[1] for p in object], 'o', label='points 2')
 
                             # to homogeneous
@@ -191,11 +278,14 @@ class Lidar_sim:
                             # back from homogeneous to cartesian
                             converted = np.array(converted[:converted.shape[1], :]).T
                             pyplot.plot([p[0] for p in converted], [p[1] for p in converted], 'o', label='converted')
-                            pyplot.plot([p[0] for p in self.pose_graph[nn][1]], [p[1] for p in self.pose_graph[nn][1]], '.', label='points 1')
+                            pyplot.plot([p[0] for p in self.pose_graph[nn][1]], [p[1] for p in self.pose_graph[nn][1]],
+                                        '.', label='points 1')
 
                             pyplot.axis('equal')
                             pyplot.legend(numpoints=1)
                             pyplot.show()
+
+
             self.last_odom = self.odom
             self.node_num += 1
 
@@ -249,14 +339,7 @@ class Lidar_sim:
         if len(line) > 1:
             cv2.line(self.body_pos_screen, line[0], line[1], color, max(1, int(0.05 * self.move_body_scale)))
 
-    def draw_wall_line(self, connection_coords, color=(255, 255, 255)):
-        connection_coords = [
-            [self.width // 2 - int(p[1] * self.line_scale),
-             self.width // 2 - int(p[0] * self.line_scale)]
-            for p in connection_coords]
-        for dot in range(1, len(connection_coords)):
-            cv2.line(self.body_pos_screen, connection_coords[dot - 1], connection_coords[dot], color,
-                     max(1, int(0.05 * self.move_body_scale)))
+
 
     def update_lidar(self):
         """
@@ -328,5 +411,5 @@ class Lidar_sim:
                  max(1, int(0.02 * self.move_body_scale)))
 
 
-sim = Lidar_sim(700, "../lidar_odom_log/lidar_odom_log_12.txt")
+sim = Lidar_sim(700, "../lidar_odom_log/lidar_odom_log_9.txt")
 sim.run()

@@ -55,8 +55,7 @@ def conv_cil_to_dec(input, ind=None):
             return None, None
         ox = cent_x + lid_dist * math.sin(lid_ang)
         oy = cent_y + lid_dist * math.cos(lid_ang)
-        ox, oy = scle_to_arr(ox, oy)
-        return [ox, oy]
+        return (ox, oy)
     elif isinstance(ind, list):
         for i in ind:
             lid_ang = i * math.radians(240) / len(lidar) - ang - math.radians(30)
@@ -65,7 +64,7 @@ def conv_cil_to_dec(input, ind=None):
                 continue
             ox = cent_x + lid_dist * math.sin(lid_ang)
             oy = cent_y + lid_dist * math.cos(lid_ang)
-            out_points.append(scle_to_arr(ox, oy))
+            out_points.append((ox, oy))
     else:
         for i in range(len(lidar)):
             lid_ang = i * math.radians(240) / len(lidar) - ang - math.radians(30)
@@ -74,24 +73,31 @@ def conv_cil_to_dec(input, ind=None):
                 continue
             ox = cent_x + lid_dist * math.sin(lid_ang)
             oy = cent_y + lid_dist * math.cos(lid_ang)
-            out_points.append(scle_to_arr(ox, oy))
+            out_points.append((ox, oy))
     return out_points
 
 
-def best_fit_transform(A, B):
+def best_fit_transform(A, B, weight_vector=None):
     # assert A.shape == B.shape
 
     # get number of dimensions
     n, m = A.shape
 
     # translate points to their centroids
-    centroid_A = np.mean(A, axis=0)
-    centroid_B = np.mean(B, axis=0)
+    #centroid_A = np.mean(A, axis=0)
+    #centroid_B = np.mean(B, axis=0)
+
+    weights_sum = np.sum(weight_vector)
+    print(np.multiply(A, weight_vector.T))
+    print()
+    centroid_A = np.sum(np.multiply(A, weight_vector.T), axis=0) / weights_sum
+    centroid_B = np.sum(np.multiply(B, weight_vector.T), axis=0) / weights_sum
     AA = A - centroid_A
     BB = B - centroid_B
+    #print(BB)
 
     # rotation matrix
-    H = np.dot(AA.T, BB)
+    H = np.dot(np.multiply(AA, weight_vector.T).T, np.multiply(BB, weight_vector.T))
     U, S, Vt = np.linalg.svd(H)
     R = np.dot(Vt.T, U.T)
 
@@ -119,12 +125,11 @@ def nearest_neighbor(src, dst):
     return dist.ravel(), indexes.ravel()
 
 
-def icp(A, B, init_pose=None, max_iterations=20, tolerance=0.01):
+def icp(A, B, init_pose=None, max_iterations=20, tolerance=0.0001, /, weight_vector=None):
     # print(A.shape, B.shape)
     # assert A.shape == B.shape
     # get number of dimensions
     n, m = A.shape
-
 
     # make points homogeneous, copy them to maintain the originals
     src = np.ones((m + 1, A.shape[0]))
@@ -138,6 +143,7 @@ def icp(A, B, init_pose=None, max_iterations=20, tolerance=0.01):
 
     prev_error = 0
     distances = []
+    mean_error = None
     i = 0
     error = None
     for i in range(max_iterations):
@@ -145,8 +151,10 @@ def icp(A, B, init_pose=None, max_iterations=20, tolerance=0.01):
         distances, indices = nearest_neighbor(src[:m, :].T, dst[:m, :].T)
 
         # compute the transformation between the current source and nearest destination points
-        T, _, _ = best_fit_transform(src[:m, :].T, dst[:m, indices].T)
-
+        if weight_vector:
+            T, _, _ = best_fit_transform(src[:m, :].T, dst[:m, indices].T, np.array(weight_vector))
+        else:
+            T, _, _ = best_fit_transform(src[:m, :].T, dst[:m, indices].T, np.ones(n).reshape(1,n))
         # update the current source
         src = np.dot(T, src)
 
@@ -157,8 +165,8 @@ def icp(A, B, init_pose=None, max_iterations=20, tolerance=0.01):
             break
 
         prev_error = mean_error
-    T, _, _ = best_fit_transform(A, src[:m, :].T)
-
+    T, _, _ = best_fit_transform(A, src[:m, :].T, np.ones(n).reshape(1,n))
+    print(i)
     return T, distances, i, mean_error
 
 
@@ -169,9 +177,9 @@ def split_objects(data):
     all_objects = [[]]
     out_objects = []
     for i in range(1, len(lidar)):
-        if lidar[i] > 5.5 or lidar[i - 1] > 5.5:
+        if lidar[i] > 5.5 or lidar[i - 1] > 5.5 or lidar[i] < 0.1 or lidar[i - 1] < 0.1:
             continue
-        if abs(lidar[i - 1] - lidar[i]) < 0.4:
+        if abs(lidar[i - 1] - lidar[i]) < 0.2:
             all_objects[-1].append(i - 1)
         else:
             all_objects.append([])
@@ -180,6 +188,7 @@ def split_objects(data):
             out_objects.append(conv_cil_to_dec([odom, lidar], i))
     out_objects = sorted(out_objects, key=lambda x: len(x), reverse=True)
     return out_objects
+
 
 approx_reg = int(map_size * 0.4)
 approx_reg_mid = int(approx_reg / 2)
@@ -190,15 +199,16 @@ neighborhood = scipy.ndimage.binary_dilation(neighborhood, structure=n_mask).ast
 for i in range(int(approx_reg_mid / 3)):
     neighborhood = scipy.ndimage.binary_dilation(neighborhood, structure=neighborhood).astype(n_mask.dtype)
 
+
 def hough_transform_dec(input):
-    resolution = 800*int(map_size*2)
-    vert_res = 800/map_size
+    resolution = 800 * int(map_size * 2)
+    vert_res = 800 / map_size
     max_point_val = len(input)
-    min_detect_val = 1/max_point_val*10
+    min_detect_val = 1 / max_point_val * 10
     detected_peaks_params = []
 
     hough_graph = np.zeros((resolution, resolution))
-    for i in range(40, len(input)-40):
+    for i in range(0, len(input)):
         for j in range(1, resolution):
 
             point = int(input[i][1] * vert_res * math.cos(math.pi / resolution * j) - input[i][0] * vert_res * math.sin(
@@ -211,7 +221,6 @@ def hough_transform_dec(input):
     cv2.waitKey(10)
 
     # define an 8-connected neighborhood
-
 
     # apply the local maximum filter; all pixel of maximal value
     # in their neighborhood are set to 1
@@ -228,12 +237,10 @@ def hough_transform_dec(input):
     # successfully subtract it form local_max, otherwise a line will
     # appear along the background border (artifact of the local maximum filter)
 
-    #eroded_background = scipy.ndimage.binary_erosion(background, structure=neighborhood, border_value=1)
+    # eroded_background = scipy.ndimage.binary_erosion(background, structure=neighborhood, border_value=1)
 
-    #resized = cv2.resize(eroded_background * 0.9, (500, 500), interpolation=cv2.INTER_AREA)  #
-    #cv2.imshow("eroded_background", resized)
-
-
+    # resized = cv2.resize(eroded_background * 0.9, (500, 500), interpolation=cv2.INTER_AREA)  #
+    # cv2.imshow("eroded_background", resized)
 
     # we obtain the final mask, containing only peaks,
     # by removing the background from the local_max mask (and operation)
@@ -247,7 +254,7 @@ def hough_transform_dec(input):
         for j in range(len(detected_peaks)):
             if detected_peaks[i][j]:
                 f, p, = math.pi / resolution * j, i - resolution / 2
-                detected_peaks_params.append([f, p/800, hough_graph[i][j]])
+                detected_peaks_params.append([f, p / 800, hough_graph[i][j]])
     detected_peaks_params = sorted(detected_peaks_params, key=lambda x: x[-1], reverse=True)
     print(detected_peaks_params)
     return detected_peaks_params
@@ -312,7 +319,7 @@ def binary_search(arr, x):
     return mid + 1
 
 
-def douglas_peucker(points):
+def douglas_peucker(points, only_peaks=False):
     iters = 20
     all_points = len(points)
     min_weight = iters * len(points) // 15
@@ -322,7 +329,7 @@ def douglas_peucker(points):
     for a in range(iters):
         for i in range(1, len(point_list)):
             point_ind = (point_list[i - 1] + point_list[i]) // 2
-            add_point = find_farthest(list(points[point_list[i - 1]:point_list[i]]), 2)
+            add_point = find_farthest(list(points[point_list[i - 1]:point_list[i]]), 0.1)
             if not add_point:
                 weights[i - 1] += point_list[i] - point_list[i - 1]
                 continue
@@ -334,40 +341,34 @@ def douglas_peucker(points):
             new_point_list.insert(adress, add_point)
         point_list = new_point_list[:]
     out_points = []
-    for i in range(len(weights)):
-        if weights[i] > min_weight:
-            if not out_points:
+    out_weights = []
+    f = 0
+    while f < len(weights) - 1 and weights[f] < min_weight:
+        f += 1
+    out_points.append(point_list[f])
+    if only_peaks:
+        for i in range(f + 1, len(point_list) - 1):
+            if weights[i - 1] + weights[i] > min_weight * 2:
                 out_points.append(point_list[i])
-            out_points.append(point_list[i + 1])
-    return out_points, weights
+                out_weights.append(weights[i - 1] + weights[i])
+        if weights[-1] < min_weight:
+            weights.pop(-1)
+        else:
+            out_points.append(point_list[-1])
+        return out_points, out_weights
+    else:
+        for i in range(len(weights)):
+            if weights[i] > min_weight:
+                if not out_points:
+                    out_points.append(point_list[i])
+                out_points.append(point_list[i + 1])
+        return out_points, weights
 
-
-def find_corners_from_hough(object):
-    lines = hough_transform_dec(object)
-    f1, p1, val1 = lines[0]
-    try:
-        a1 = math.tan(f1)
-        b1 = (p1 / math.sin(math.pi / 2 - f1))
-        f2, p2, val2 = lines[1]
-        a2 = math.tan(f2)
-        b2 = (p2 / math.sin(math.pi / 2 - f2))
-        x = (b2 - b1) / (a1 - a2)
-        y = x * a1 + b1
-        x1 = np.linspace(-10, 10, 100)
-        y1 = a1 * x1 + b1
-        # pyplot.plot(x1, y1, label='line1')
-
-        x2 = np.linspace(-10, 10, 100)
-        y2 = a2 * x2 + b2
-        # pyplot.plot(x2, y2, label='line2')
-        return [x, y]
-    except:
-        return None
 
 def find_corners(object, approx_points_ind):
     connection_coords = [[object[p][0], object[p][1]] for p in approx_points_ind]
     if not connection_coords:
-        return None
+        return None, None
     b_prev = None
     b_curr = 0
     a_prev = None
@@ -377,8 +378,7 @@ def find_corners(object, approx_points_ind):
     corner = []
     corner_lines = []
     for i in range(1, len(connection_coords)):
-
-        x1, y1 = connection_coords[i-1]
+        x1, y1 = connection_coords[i - 1]
         x2, y2 = connection_coords[i]
         a_curr = 0
         if x1 == x2 or y1 == y2:
@@ -389,9 +389,11 @@ def find_corners(object, approx_points_ind):
         if a_prev:
             pass
         ang_curr = math.atan2((y1 - y2), (x1 - x2))
-        if a_prev and abs(math.atan(a_curr)+math.atan(1/a_prev)) < offset:
-            corner.append([object[approx_points_ind[i-2]:approx_points_ind[i]], approx_points_ind[i-1]-approx_points_ind[i-2]])
-            corner_lines.append(([ang_prev, b_prev], [ang_curr, b_curr], object[approx_points_ind[i-1]], connection_coords[i-2:i+1]))
+        if a_prev and abs(math.atan(a_curr) + math.atan(1 / a_prev)) < offset:
+            corner.append([object[approx_points_ind[i - 2]:approx_points_ind[i]],
+                           approx_points_ind[i - 1] - approx_points_ind[i - 2]])
+            corner_lines.append(([ang_prev, b_prev], [ang_curr, b_curr], object[approx_points_ind[i - 1]],
+                                 connection_coords[i - 2:i + 1]))
         a_prev = a_curr
         b_prev = b_curr
         ang_prev = ang_curr
@@ -401,89 +403,13 @@ def find_corners(object, approx_points_ind):
         return None, None
 
 
-
-
-
-all_detected_corners_line = []
-def check_existing_corners_by_lines(object):
-    object = np.array(object)
-    approx_points_ind, _ = douglas_peucker(object)
-    _, corners = find_corners(object, approx_points_ind)
-    if not corners:
-        return None
-    max_offset = 40
-    min_offset = 10
-    for c in range(len(corners)):
-        line1, line2, corner, coords = corners[c]
-        for i in range(len(all_detected_corners_line)):
-            xof = (corner[0] - all_detected_corners_line[i][2][0]) ** 2
-            yof = (corner[1] - all_detected_corners_line[i][2][1]) ** 2
-            if max_offset > xof + yof > min_offset:
-                line1_f, line2_f, corner_f, coords_f = all_detected_corners_line[i]
-                pyplot.plot([coords[0][0], coords[1][0], coords[2][0]], [coords[0][1], coords[1][1], coords[2][1]], label='curr', linestyle="solid")
-                pyplot.plot([coords_f[0][0], coords_f[1][0], coords_f[2][0]], [coords_f[0][1], coords_f[1][1], coords_f[2][1]], label='node', linestyle="solid")
-                pos_err = corner-corner_f
-                if line1[0] - line1_f[0] < line1[0] - line2_f[0]:
-                    rot_err = (line1[0] - line1_f[0] + line2[0] - line2_f[0]) / 2
-                else:
-                    rot_err = (line1[0] - line2_f[0] + line2[0] - line1_f[0]) / 2
-                pyplot.axline((0, line1[1]), slope=math.tan(line1[0]), color="black", linestyle=(0, (5, 5)))
-
-
-
-                pyplot.axis('equal')
-                pyplot.legend(numpoints=1)
-                pyplot.show()
-                return i
-
-        all_detected_corners_line.append(corners[c])
-
-def check_existing_corners(object):
-    object = np.array(object)
-    approx_points_ind, _ = douglas_peucker(object)
-    corners, _ = find_corners(object, approx_points_ind)
-    if not corners:
-        return None
-    max_offset = 40
-    min_offset = 10
-    for c in range(len(corners)):
-        corner_rel_ind = corners[c][1]
-        corner = corners[c][0][corner_rel_ind]
-        for i in range(len(all_detected_corners)):
-            xof = (corner[0]-all_detected_corners[i][0][0])**2
-            yof = (corner[1]-all_detected_corners[i][0][1])**2
-            if max_offset > xof+yof > min_offset:
-                #icp here
-                icp_out = icp(corners[c][0], all_detected_corners[i][1], corner_rel_ind, all_detected_corners[i][2])
-                if True:
-                    pyplot.plot([p[0] for p in corners[c][0]], [p[1] for p in corners[c][0]], 'o', label='points 2')
-
-                    # to homogeneous
-                    converted = np.ones((corners[c][0].shape[1] + 1, corners[c][0].shape[0]))
-                    converted[:corners[c][0].shape[1], :] = np.copy(corners[c][0].T)
-                    # transform
-                    converted = np.dot(icp_out[0], converted)
-                    # back from homogeneous to cartesian
-                    converted = np.array(converted[:converted.shape[1], :]).T
-                    pyplot.plot([p[0] for p in converted], [p[1] for p in converted], 'o', label='converted')
-                    pyplot.plot([p[0] for p in all_detected_corners[i][1]], [p[1] for p in all_detected_corners[i][1]], '.', label='points 1')
-
-                    pyplot.axis('equal')
-                    pyplot.legend(numpoints=1)
-                    pyplot.show()
-
-                return i
-        all_detected_corners.append([corner, np.array(corners[c][0]), corner_rel_ind])
-    return None
-
 def draw_line(a, b, name="line"):
     x = np.linspace(-10, 10, 100)
     y = a * x + b
     pyplot.plot(x, y, label=name)
 
-
-#inp1 = open_log()
-#points1 = np.array(conv_cil_to_dec(inp1))
+# inp1 = open_log()
+# points1 = np.array(conv_cil_to_dec(inp1))
 # points2 = np.array(conv_cil_to_dec(inp2))
 # icp_out = icp(points1, points2)
 # print(icp_out[0], icp_out[2], icp_out[3])
@@ -509,10 +435,10 @@ def draw_line(a, b, name="line"):
 # object_coords = list(points1[i] for i in objects[0])
 
 
-#object_coords = split_objects(inp1)
+# object_coords = split_objects(inp1)
 
-#print(len(object_coords))
-#for object in object_coords:
+# print(len(object_coords))
+# for object in object_coords:
 #    approx_points, _ = douglas_peucker(object)
 #    print(approx_points)
 #    connection_coords = [object[p] for p in approx_points[1:-1]]
@@ -527,7 +453,7 @@ def draw_line(a, b, name="line"):
 # print(a, corner_id)
 # pyplot.plot(*corner, 'o', label='corner')
 
-#pyplot.plot(*scle_to_arr(*inp1[0][:-1:]), 'o', label='robot')
-#pyplot.axis('equal')
-#pyplot.legend(numpoints=1)
-#pyplot.show()
+# pyplot.plot(*scle_to_arr(*inp1[0][:-1:]), 'o', label='robot')
+# pyplot.axis('equal')
+# pyplot.legend(numpoints=1)
+# pyplot.show()
