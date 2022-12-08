@@ -98,28 +98,40 @@ class Lidar_sim:
 
                 self.odom, self.lidar = self.log_data[self.log_data_ind]
 
-                if self.log_data_ind + 1 < len(self.log_data):
-                    self.log_data_ind += 1
-                    self.step = True
+
 
                 self.m1_slider.set_val(self.log_data_ind)
                 self.update_lidar()
-
                 self.process_SLAM()
 
+                if self.log_data_ind + 1 < len(self.log_data):
+                    self.log_data_ind += 1
+                    self.step = True
+                else:
+                    self.Gauss_Newton()
+                    #map = np.concatenate(split_objects([self.pose_graph[0][0], self.pose_graph[0][2]]), axis=0)
+                    #for i in range(1, self.node_num):
+                    #    new = np.concatenate(split_objects([self.pose_graph[i][0], self.pose_graph[i][2]]), axis=0)
+                    #    map = np.append(map, new, axis=0)
+                    #pyplot.plot([p[0] for p in map], [p[1] for p in map], '.', label=f'new {2}')
+                    #print(map.shape)
+                    #pyplot.axis('equal')
+                    #pyplot.legend(numpoints=1)
+                    #pyplot.show()
+
+
             self.screen.step()
-            self.clock.tick(9)
+            #self.clock.tick(1000)
 
     def homogen_matrix_from_odom(self, odom):
         x, y, rot = odom
-        rot = rot - math.pi / 2
         robot_rad = 0.3
         X = np.array([[1, 0, x],
                       [0, 1, y],
                       [0, 0, 1]])
 
-        f = np.array([[1, 0, 0],
-                      [0, 1, robot_rad],
+        f = np.array([[1, 0, robot_rad],
+                      [0, 1, 0],
                       [0, 0, 1]])
 
         rot = np.array([[math.cos(rot), -math.sin(rot), 0],
@@ -129,33 +141,36 @@ class Lidar_sim:
         X = np.dot(X, np.dot(rot, f))
         return X
 
-    def add_edge(self, from_n, to_n):
-        #print("from:", from_n)
-        #print("to:", to_n)
-        if isinstance(from_n, np.ndarray):
-            A = np.linalg.inv(from_n)
-        else:
-            A = np.linalg.inv(self.homogen_matrix_from_odom(from_n))
-        if isinstance(to_n, np.ndarray):
-            B = np.copy(to_n)
-        else:
-            B = self.homogen_matrix_from_odom(to_n)
+    def add_node(self, parent_id, odom, object, lidar):# odom, object, lidar, children[child id, edge id]]
+        self.add_edge(parent_id, odom)
+        self.pose_graph[self.node_num] = [odom, object, lidar, []]
+        if not isinstance(odom, list):
+            aco = math.acos(odom[0, 0])
+            asi = math.asin(odom[1, 0])
+            odom = [*odom[:2, 2], aco*(asi/abs(asi))]
+        self.nodes_coords = np.append(self.nodes_coords, [odom], axis=0)
+        self.node_num+=1
+
+    def add_edge(self,parent_id, to_n):
+        self.pose_graph[parent_id][3].append([self.node_num, self.edge_num])
+        A = np.linalg.inv(self.pose_graph[parent_id][0])
+        B = np.copy(to_n)
         if self.edge_num > 0:
             self.edge = np.append(self.edge, [np.dot(A, B)], axis=0)
             self.edge_num += 1
         else:
             self.edge = np.array([np.dot(A, B)])
             self.edge_num += 1
-        #print(np.dot(A, B))
+
+    def view(self, from_n, to_n):
+        A = np.linalg.inv(from_n)
+        B = np.copy(to_n)
+        return np.dot(A, B)
 
     def draw_line_from_point_cloud(self, object, color=(255, 255, 255)):
         approx_points = douglas_peucker(object, True)[0]
         connection_coords = [[int(self.width // 2 + object[p][1]*self.move_body_scale),
                               int(self.width // 2 - object[p][0]*self.move_body_scale)] for p in approx_points]
-        #connection_coords = [
-        #    [int(p[1]),
-        #     int(p[0])]
-        #   for p in connection_coords]
         for dot in range(1, len(connection_coords)):
             cv2.line(self.body_pos_screen, connection_coords[dot - 1], connection_coords[dot], color,
                      max(1, int(0.05 * self.move_body_scale)))
@@ -164,7 +179,6 @@ class Lidar_sim:
         ind = src[0]
         w = src[1]
         out = []
-        print(src)
         curr = 0
         step = w[0] / (ind[1] - ind[0])
         for a in range(0, ind[1] - ind[0]):
@@ -194,106 +208,114 @@ class Lidar_sim:
     def process_SLAM(self):
         object_coords = split_objects(self.log_data[self.log_data_ind])
         object = object_coords[0]
-        #scaled_odom = [*scle_to_arr(*self.odom[:2]), self.odom[2]]
-        #print(scaled_odom, self.odom)
         self.draw_line_from_point_cloud(object)
         peaks = douglas_peucker(object, True)
-        corners, corner_lines = find_corners(object, peaks[0])
         x, y, r = self.odom
+        mat_odom = self.homogen_matrix_from_odom(self.odom)
         xo, yo, ro = self.last_odom
-        if math.sqrt((x - xo) ** 2 + (y - yo) ** 2) > 0.01 or abs(r - ro) > 0.5 or self.node_num == 0:
+        if math.sqrt((x - xo) ** 2 + (y - yo) ** 2) > 0.1 or abs(r - ro) > 0.5 or self.node_num == 0:
             if self.node_num == 0:
                 self.nodes_coords = (np.array([self.odom]))
-                self.pose_graph[self.node_num] = [self.odom, None, self.lidar, []]
-            elif not corners:
-                self.pose_graph[self.node_num] = [self.odom, None, self.lidar, []]
-                self.pose_graph[self.node_num - 1][3].append([self.node_num, self.edge_num])
-                self.add_edge(self.pose_graph[self.node_num - 1][0], self.odom)
-                #pyplot.plot(*zip(self.odom[:2]), 'o', label=f'robot1- ang: {self.odom[2]}')
-                #pyplot.plot(*zip(self.pose_graph[self.node_num - 1][0][:2]), 'o', label=f'robot2- ang: {self.pose_graph[self.node_num - 1][0][2]}')
-                #pyplot.axis('equal')
-                #pyplot.legend(numpoints=1)
-                #pyplot.show()
+                self.pose_graph[self.node_num] = [mat_odom, None, self.lidar, []]
+                self.node_num+=1
+            elif len(peaks[0]) < 3 or self.node_num < 2:
+                self.add_node(self.node_num - 1, mat_odom, None, self.lidar)
             else:
-                corners = sorted(corners, key=lambda x: x[1], reverse=True)
-
-                #object = np.array(corners[0][0])
                 object = np.array(object_coords[0])
-                self.pose_graph[self.node_num] = [self.odom, object, self.lidar, []]
-                _, cl_points = self.find_n_closest(self.odom, min(5, self.node_num))
-                self.nodes_coords = np.append(self.nodes_coords, [self.odom], axis=0)
+                _, cl_points = self.find_n_closest(self.odom, min(5, self.node_num-1))
                 if isinstance(cl_points, int):
                     cl_points = [cl_points]
+                found = False
+                self.add_node(self.node_num - 1, mat_odom, object, self.lidar)
                 for nn in cl_points:
                     if isinstance(self.pose_graph[nn][1], np.ndarray):
                         weight_vector = self.generate_weight_vector(peaks)
-                        print(len(weight_vector))
-                        print(len(object[peaks[0][0]:peaks[0][-1]]))
                         icp_out = icp(object[peaks[0][0]:peaks[0][-1]], np.array(self.pose_graph[nn][1]), weight_vector=[weight_vector])
                         # draw icp
-                        if icp_out[-1] and icp_out[-1] < 0.1:
-                            print(icp_out[-1])
-                            self.pose_graph[nn][3].append([self.node_num, self.edge_num])
-                            mat_odom = self.homogen_matrix_from_odom(self.odom)
-                            T = np.copy(icp_out[0])
-                            #print("T:", T)
-                            mat_odom_rot = mat_odom[:2, :2]
-                            mat_odom_t = mat_odom[:2, 2]
-                            T_rot = T[:2, :2]
-                            T_t = T[:2, 2] / T[2, 2]
-                            mat_odom_rot = np.dot(mat_odom_rot, T_rot)
-                            mat_odom_t = mat_odom_t + T_t
-                            corrected_odom = np.eye(3)
-                            corrected_odom[:2, :2] = mat_odom_rot
-                            corrected_odom[:2, 2] = T_t
+                        if icp_out[-1] and icp_out[-1] < 0.3:
+                            #print(icp_out[-1])
+                            corrected_odom = np.dot(icp_out[0], mat_odom)
 
+                            self.add_edge(nn, corrected_odom)
 
-                            #pyplot.figure(1)
-                            #pyplot.subplot()
-
-                            #pyplot.plot(*zip(self.odom[:2]), 'o', label=f'robot1- ang: {self.odom[2]}')
-                            #pyplot.plot(*zip(corrected_odom[:2, 2]), 'o', label=f'robot_c- ang: {math.acos(corrected_odom[0, 0])}')
-                            #pyplot.plot(*zip(self.pose_graph[nn][0][:2]), 'o',
-                            #            label=f'robot2- ang: {self.pose_graph[nn][0][2]}')
+                            object_to_draw = split_objects([self.odom, self.lidar])[0]
+                            pyplot.plot([p[0] for p in object_to_draw], [p[1] for p in object_to_draw], 'o',
+                                        label='points 2')
+                            #aco = math.acos(corrected_odom[0, 0])
+                            #asi = math.asin(corrected_odom[1, 0])
+                            #c_odom = [*corrected_odom[:2, 2], aco * (asi / abs(asi))]
+                            #converted = split_objects([corrected_odom, self.lidar])[0]
+                            #pyplot.plot([p[0] for p in converted], [p[1] for p in converted], 'o', label='converted')
+                            #src = split_objects([self.pose_graph[nn][0], self.pose_graph[nn][2]])[0]
+                            #pyplot.plot([p[0] for p in src], [p[1] for p in src], '.', label='src')
                             #pyplot.axis('equal')
                             #pyplot.legend(numpoints=1)
-
-
-                            self.add_edge(self.pose_graph[nn][0], corrected_odom)
-                            #self.draw_line_from_point_cloud(object, (0, 255, 0))
-                            #self.draw_line_from_point_cloud(self.pose_graph[nn][1], (0, 0, 255))
-                            self.screen.step()
-                            self.clock.tick(6)
-
-
-                            pyplot.figure(2)
-                            pyplot.subplot()
-                            pyplot.plot([p[0] for p in object], [p[1] for p in object], 'o', label='points 2')
-
-                            # to homogeneous
-                            converted = np.ones((object.shape[1] + 1, object.shape[0]))
-                            converted[:object.shape[1], :] = np.copy(object.T)
-                            # transform
-                            converted = np.dot(icp_out[0], converted)
-                            # back from homogeneous to cartesian
-                            converted = np.array(converted[:converted.shape[1], :]).T
-                            pyplot.plot([p[0] for p in converted], [p[1] for p in converted], 'o', label='converted')
-                            pyplot.plot([p[0] for p in self.pose_graph[nn][1]], [p[1] for p in self.pose_graph[nn][1]],
-                                        '.', label='points 1')
-
-                            pyplot.axis('equal')
-                            pyplot.legend(numpoints=1)
-                            pyplot.show()
-
+                            #pyplot.show()
 
             self.last_odom = self.odom
-            self.node_num += 1
+
+
+    def error_func(self, i, Xi, j, Xj):
+        Xi_node = self.pose_graph[i]
+        Xj_node = self.pose_graph[j]
+        Wii, Wie = [i[0] for i in Xi_node[3]], [i[1] for i in Xi_node[3]]
+        Wji, Wje = [i[0] for i in Xj_node[3]], [i[1] for i in Xj_node[3]]
+
+        if j in Wii:
+            ei = Wie[Wii.index(j)]
+        elif i in Wji:
+            ei = Wje[Wji.index(i)]
+        else:
+            return False
+        Zij = self.edge[ei]
+        Xi = self.homogen_matrix_from_odom(Xi)
+        Xj = self.homogen_matrix_from_odom(Xj)
+
+        err_mat = np.linalg.inv(Zij)@(np.linalg.inv(Xi)@Xj)
+        aco = math.acos(max(-1, min(1, err_mat[0, 0])))
+        asi = math.asin(max(-1, min(1, err_mat[1, 0])))
+        return np.array([*err_mat[:2, 2], aco * (asi / abs(asi))]).astype(float)
+
+
+    def Jacobian(self, i, j):
+        eps = 1e-6
+        grad_i = []
+        grad_j = []
+        Xi_node = self.pose_graph[i]
+        Xj_node = self.pose_graph[j]
+        Wii, Wie = [i[0] for i in Xi_node[3]], [i[1] for i in Xi_node[3]]
+        Wji, Wje = [i[0] for i in Xj_node[3]], [i[1] for i in Xj_node[3]]
+        if j not in Wii and i not in Wji:
+            return False
+
+        Xi = self.nodes_coords[i]
+        Xj = self.nodes_coords[j]
+
+        for a in range(3):
+            t = np.zeros(3).astype(float)
+            t[a] = t[a] + eps
+            grad_i.append((self.error_func(i, Xi+t, j, Xj) - self.error_func(i, Xi-t, j, Xj)) / (2 * eps))
+        for b in range(3):
+            t = np.zeros(3).astype(float)
+            t[b] = t[b] + eps
+            grad_j.append((self.error_func(i, Xi, j, Xj+t) - self.error_func(i, Xi, j, Xj-t)) / (2 * eps))
+        return np.column_stack(grad_i).astype(float), np.column_stack(grad_j).astype(float)
+
+    def Gauss_Newton(self):
+        J = np.zeros((self.node_num, 3, 3))
+        for i in range(self.node_num):
+            for j in range(i, self.node_num):
+                Jij = self.Jacobian(i, j)
+                if Jij:
+                    J[i, :, :] = np.copy(Jij[0])
+                    J[j, :, :] = np.copy(Jij[1])
+                #    print(J[i])
+                else:
+                    print(i, j, J[i])
+        print(J)
 
     def find_n_closest(self, point, n):
-        node_arr = self.nodes_coords
-        if not node_arr.any():
-            return None, None
-        nodes_tree = scipy.spatial.cKDTree(node_arr)
+        nodes_tree = scipy.spatial.cKDTree(self.nodes_coords)
         return nodes_tree.query(point, n)
 
     def update_keys(self):
@@ -411,5 +433,5 @@ class Lidar_sim:
                  max(1, int(0.02 * self.move_body_scale)))
 
 
-sim = Lidar_sim(700, "../lidar_odom_log/lidar_odom_log_9.txt")
+sim = Lidar_sim(700, "../lidar_odom_log/lidar_odom_log_6.txt")
 sim.run()

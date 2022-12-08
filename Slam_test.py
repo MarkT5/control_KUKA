@@ -41,13 +41,13 @@ def fit_line(points):
     return r
 
 
-def conv_cil_to_dec(input, ind=None):
+def conv_cil_to_dec_old(input, ind=None):
     out_points = []
     odom, lidar = input
     x, y, ang = odom
     cent_y, cent_x = y, x
-    cent_y = cent_y - 0.3 * math.cos(ang + math.pi / 2)
-    cent_x = cent_x + 0.3 * math.sin(ang + math.pi / 2)
+    cent_x = cent_x + 0.3 * math.cos(ang)
+    cent_y = cent_y + 0.3 * math.sin(ang)
     if isinstance(ind, int):
         lid_ang = ind * math.radians(240) / len(lidar) - ang - math.radians(30)
         lid_dist = lidar
@@ -77,6 +77,62 @@ def conv_cil_to_dec(input, ind=None):
     return out_points
 
 
+def conv_cil_to_dec(input, ind=None):
+    out_points = []
+    odom, lidar = input
+    x, y, rot = odom
+    robot_rad = 0.3
+    if isinstance(odom, list):
+        X = np.array([[1, 0, x],
+                      [0, 1, y],
+                      [0, 0, 1]])
+
+        f = np.array([[1, 0, robot_rad],
+                      [0, 1, 0],
+                      [0, 0, 1]])
+
+        rot = np.array([[math.cos(rot), -math.sin(rot), 0],
+                        [math.sin(rot), math.cos(rot), 0],
+                        [0, 0, 1]])
+
+        odom = np.dot(X, np.dot(rot, f))
+
+    if isinstance(ind, int):
+        lid_ang = ind * math.radians(240) / len(lidar) - math.radians(30)
+        lid_dist = lidar
+        if lid_dist > 5.5:
+            return None, None
+        ox = lid_dist * math.sin(lid_ang)
+        oy = lid_dist * math.cos(lid_ang)
+        print(np.dot(odom, np.array([[ox, oy, 1]]).T).T)
+        return np.dot(odom, np.array([[ox, oy, 1]]).T).T[:2]
+    elif isinstance(ind, list):
+        for i in ind:
+            lid_ang = i * math.radians(240) / len(lidar) - math.radians(30)
+            lid_dist = lidar[i]
+            if lid_dist > 5.5:
+                continue
+            ox = lid_dist * math.sin(lid_ang)
+            oy = lid_dist * math.cos(lid_ang)
+            out_points.append((ox, oy))
+    else:
+        for i in range(len(lidar)):
+            lid_ang = i * math.radians(240) / len(lidar) - math.radians(30)
+            lid_dist = lidar[i]
+            if lid_dist > 5.5:
+                continue
+            ox = lid_dist * math.sin(lid_ang)
+            oy = lid_dist * math.cos(lid_ang)
+            out_points.append((ox, oy))
+    out_points = np.array(out_points)
+    converted = np.ones((out_points.shape[1] + 1, out_points.shape[0]))
+    converted[:out_points.shape[1], :] = np.copy(out_points.T)
+    # transform
+    converted = np.dot(odom, converted)
+    # back from homogeneous to cartesian
+    converted = np.array(converted[:converted.shape[1], :]).T
+    return converted[:, :2]
+
 def best_fit_transform(A, B, weight_vector=None):
     # assert A.shape == B.shape
 
@@ -88,8 +144,6 @@ def best_fit_transform(A, B, weight_vector=None):
     #centroid_B = np.mean(B, axis=0)
 
     weights_sum = np.sum(weight_vector)
-    print(np.multiply(A, weight_vector.T))
-    print()
     centroid_A = np.sum(np.multiply(A, weight_vector.T), axis=0) / weights_sum
     centroid_B = np.sum(np.multiply(B, weight_vector.T), axis=0) / weights_sum
     AA = A - centroid_A
@@ -166,7 +220,6 @@ def icp(A, B, init_pose=None, max_iterations=20, tolerance=0.0001, /, weight_vec
 
         prev_error = mean_error
     T, _, _ = best_fit_transform(A, src[:m, :].T, np.ones(n).reshape(1,n))
-    print(i)
     return T, distances, i, mean_error
 
 
@@ -177,7 +230,7 @@ def split_objects(data):
     all_objects = [[]]
     out_objects = []
     for i in range(1, len(lidar)):
-        if lidar[i] > 5.5 or lidar[i - 1] > 5.5 or lidar[i] < 0.1 or lidar[i - 1] < 0.1:
+        if lidar[i] > 5.5 or lidar[i - 1] > 5.5 or lidar[i] < 0.5 or lidar[i - 1] < 0.5:
             continue
         if abs(lidar[i - 1] - lidar[i]) < 0.2:
             all_objects[-1].append(i - 1)
@@ -256,7 +309,6 @@ def hough_transform_dec(input):
                 f, p, = math.pi / resolution * j, i - resolution / 2
                 detected_peaks_params.append([f, p / 800, hough_graph[i][j]])
     detected_peaks_params = sorted(detected_peaks_params, key=lambda x: x[-1], reverse=True)
-    print(detected_peaks_params)
     return detected_peaks_params
 
 
@@ -321,14 +373,12 @@ def binary_search(arr, x):
 
 def douglas_peucker(points, only_peaks=False):
     iters = 20
-    all_points = len(points)
     min_weight = iters * len(points) // 15
     point_list = [0, len(points) - 1]
     weights = [0]
     new_point_list = [0, len(points) - 1]
     for a in range(iters):
         for i in range(1, len(point_list)):
-            point_ind = (point_list[i - 1] + point_list[i]) // 2
             add_point = find_farthest(list(points[point_list[i - 1]:point_list[i]]), 0.1)
             if not add_point:
                 weights[i - 1] += point_list[i] - point_list[i - 1]
