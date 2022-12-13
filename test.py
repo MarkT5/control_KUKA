@@ -3,11 +3,30 @@ import math
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-J = np.zeros((20, 3, 3))
-J[3, :, :] = [[1,2,3], [1,2,3], [1,2,3]]
+J = np.zeros((20, 20))
 
-print(J)
-
+J[6:9, 0:3] = [[1,2,3], [1,2,3], [1,2,3]]
+L = np.array([[1,0,0], [2,3,0],[4,5,6]])
+""" QR decomposition with scipy """
+import scipy.linalg as linalg
+import numpy as np # same matrix A and B as in LU decomposition
+A = np.array([ [2., 1., 1.], [1., 3., 2.], [1., 0., 0]])
+B = np.array([4., 5., 6.])
+Q, R = linalg.qr(A) # QR decomposition with qr function
+y = np.dot(Q.T, B) # Let y=Q'.B using matrix multiplication
+x = linalg.solve(R, y) # Solve Rx=y
+print(A.shape)
+print(B. shape)
+print(Q.shape)
+print(R.shape)
+print(y.shape)
+print(x)
+#(3, 3)
+#(3,)
+#(3, 3)
+#(3, 3)
+#(3,)
+#[  6.  15. -23.]
 def func(b, x):
     return b[0] * x / (b[1] + x)
 

@@ -8,7 +8,7 @@ import scipy
 class PoseGrah:
     def __init__(self):
         self.edges = np.array(False)
-        self.edges_weights = []
+        self.edges_cov = []
         self.edge_num = 0
         self.node_num = 0
         self.children_id = []
@@ -87,8 +87,9 @@ class PoseGrah:
                 if isinstance(value[0], list):
                     B = self.homogen_matrix_from_pos(value[0])
                 else:
-                    B = value
+                    B = value[0]
                 self.edges[self.edges_id[ind][self.children_id[ind].index(child)]] = np.dot(A, B)
+                self.edges_cov[self.edges_id[ind][self.children_id[ind].index(child)]] = value[1]
 
 
     def __len__(self):
@@ -118,6 +119,16 @@ class PoseGrah:
         else:
             return self.edges[self.edges_id[parent_child[0]][self.children_id[parent_child[0]].index(parent_child[1])]]
 
+    def edge_cov(self, i, j, /, pos_form=False):
+        if i < 0:
+            i += self.node_num
+        if j < 0:
+            j += self.node_num
+        parent_child = sorted([i, j])
+        if parent_child[1] not in self.children_id[parent_child[0]]:
+            raise AttributeError(f"no edge {i}, {j}")
+        return self.edges_cov[self.edges_id[parent_child[0]][self.children_id[parent_child[0]].index(parent_child[1])]]
+
 
     def add_node(self, parent_id, pos, object, lidar):  # pos, object, lidar, children[child id, edge id]]
         self.objects.append(object)
@@ -127,7 +138,6 @@ class PoseGrah:
 
         if self.node_num == 0:
             self.pos = np.array([pos]).astype(np.double)
-            self.add_edge(self.node_num, pos, self.node_num)
         else:
             if parent_id < 0:
                 parent_id += self.node_num
@@ -137,7 +147,7 @@ class PoseGrah:
 
         self.node_num += 1
 
-    def add_edge(self, parent_id, to_n, child_id):
+    def add_edge(self, parent_id, to_n, child_id, cov=0.01):
         parent_id = int(parent_id)
         child_id = int(child_id)
         if child_id < 0:
@@ -155,8 +165,10 @@ class PoseGrah:
             B = to_n.astype(np.double)
         if self.edge_num > 0:
             self.edges = np.append(self.edges, [np.dot(A, B)], axis=0).astype(np.double)
+            self.edges_cov.append(cov)
         else:
-            self.edges = np.array([B]).astype(np.double)
+            self.edges = np.array([np.dot(A, B)]).astype(np.double)
+            self.edges_cov.append(cov)
         self.edge_num += 1
 
     def homogen_matrix_from_pos(self, pos):
@@ -172,10 +184,10 @@ class PoseGrah:
 
         cr = math.cos(rot)
         sr = math.sin(rot)
-        if abs(cr) < 1e-16:
-            cr = 0
-        if abs(sr) < 1e-16:
-            sr = 0
+        #if abs(cr) < 1e-16:
+        #    cr = 0
+        #if abs(sr) < 1e-16:
+        #    sr = 0
         rot = np.array([[cr, -sr, 0],
                         [sr, cr, 0],
                         [0, 0, 1]]).astype(np.double)
@@ -188,38 +200,6 @@ class PoseGrah:
         asi = math.asin(max(-1, min(1, mat[1, 0])))
         asi_sign = 1 - 2 * (asi > 0)
         return np.array([*mat[:2, 2], aco * (asi_sign)]).astype(float)
-    def pos_vector_from_homogen_matrix_with_robot(self, mat):
-        co = mat[0, 0]
-        si = mat[1, 0]
-        x = mat[0, 2]
-        y = mat[1, 2]
-        if abs(co) < 1e-15:
-            co = 0
-        if abs(si) < 1e-15:
-            si = 0
-        if 1 - abs(co) < 1e-15:
-            co = 1
-        if 1 - abs(si) < 1e-15:
-            si = 1
-
-        robot_rad = 0.3
-        f = np.array([[1, 0, robot_rad],
-                      [0, 1, 0],
-                      [0, 0, 1]]).astype(np.double)
-        rot = np.array([[co, -si, 0],
-                        [si, co, 0],
-                        [0, 0, 1]]).astype(np.double)
-        mat = np.dot(mat, np.linalg.inv(np.dot(rot, f)))
-        x = mat[0, 2]
-        y = mat[1, 2]
-        if abs(x) < 1e-15:
-            x = 0
-        if abs(y) < 1e-15:
-            y = 0
-        aco = math.acos(max(-1, min(1, co)))
-        asi = math.asin(max(-1, min(1, si)))
-        asi_sign = -1 + 2 * (asi > 0)
-        return np.array([x, y, aco * (asi_sign)]).astype(np.double)
 
     def find_n_closest(self, node_num, n):
         if node_num < 0:

@@ -3,6 +3,7 @@ from Screen import Screen
 from Slam_test import *
 import numpy as np
 from pose_graph import PoseGrah
+
 deb = True
 
 
@@ -162,7 +163,7 @@ class Lidar_sim:
         x, y, r = self.odom
         xo, yo, ro = self.last_odom
         if math.sqrt((x - xo) ** 2 + (y - yo) ** 2) > 0.02 or abs(r - ro) > 0.05 or len(self.pose_graph) == 0:
-            #self.pose_graph.add_node(-1, self.odom, None, self.lidar)
+            # self.pose_graph.add_node(-1, self.odom, None, self.lidar)
             if len(self.pose_graph) < 2:
                 self.pose_graph.add_node(-1, self.odom, None, self.lidar)
                 return
@@ -177,26 +178,24 @@ class Lidar_sim:
                         icp_out = icp(object[peaks[0][0]:peaks[0][-1]], np.array(self.pose_graph[nn, "object"]),
                                       weight_vector=[weight_vector])
                         # draw icp
-                        if icp_out[-1] and icp_out[-1] < 0.1:
-                            print(icp_out[-1])
+                        if icp_out[-1] and icp_out[-1] < 0.07:
                             err = self.pose_graph.pos_vector_from_homogen_matrix(icp_out[0])
-                            print(err)
-                            if err[0]**2+err[1]**2 > 1 or abs(err[2]) > 1:
+                            if err[0] ** 2 + err[1] ** 2 > 1 or abs(err[2]) > 1:
                                 return
                             corrected_odom = np.dot(icp_out[0], self.pose_graph[-1, "mat_pos"]).astype(np.double)
-                            if nn == len(self.pose_graph)-2:
-                                self.pose_graph[nn, "edge", -1] = corrected_odom  # [parent, "edge", child] = value
+                            if nn == len(self.pose_graph) - 2:
+                                self.pose_graph[nn, "edge", -1] = (corrected_odom, 1)  # [parent, "edge", child] = value
                             else:
-                                self.pose_graph.add_edge(nn, corrected_odom, -1)
+                                self.pose_graph.add_edge(nn, corrected_odom, -1, 1)
 
-                            #pyplot.plot([p[0] for p in object[peaks[0][0]:peaks[0][-1]]], [p[1] for p in object[peaks[0][0]:peaks[0][-1]]], 'o',
-                            #           label='points 2')
-                            #converted = split_objects([corrected_odom, self.lidar])[0]
-                            #pyplot.plot([p[0] for p in converted], [p[1] for p in converted], 'o', label='converted')
-                            #pyplot.plot([p[0] for p in self.pose_graph[nn, "object"]], [p[1] for p in self.pose_graph[nn, "object"]], '.', label='src')
-                            #pyplot.axis('equal')
-                            #pyplot.legend(numpoints=1)
-                            #pyplot.show()
+                            pyplot.plot([p[0] for p in object[peaks[0][0]:peaks[0][-1]]], [p[1] for p in object[peaks[0][0]:peaks[0][-1]]], 'o',
+                                      label='points 2')
+                            converted = split_objects([corrected_odom, self.lidar])[0]
+                            pyplot.plot([p[0] for p in converted], [p[1] for p in converted], 'o', label='converted')
+                            pyplot.plot([p[0] for p in self.pose_graph[nn, "object"]], [p[1] for p in self.pose_graph[nn, "object"]], '.', label='src')
+                            pyplot.axis('equal')
+                            pyplot.legend(numpoints=1)
+                            pyplot.show()
                             return
             elif math.sqrt((x - xo) ** 2 + (y - yo) ** 2) > 0.1 or abs(r - ro) > 0.1:
                 self.pose_graph.add_node(-1, self.odom, None, self.lidar)
@@ -204,8 +203,6 @@ class Lidar_sim:
             print(len(self.pose_graph))
 
     def error_func(self, i, Xi, j, Xj):
-        if i == j == 0:
-            return Xi*4
         Zij = self.pose_graph.edge(i, j)
         Xi = self.pose_graph.homogen_matrix_from_pos(Xi)
         Xj = self.pose_graph.homogen_matrix_from_pos(Xj)
@@ -214,7 +211,7 @@ class Lidar_sim:
         return err
 
     def Jacobian(self, i, j):
-        eps = 1e-6
+        eps = 1e-12
         grad_i = []
         grad_j = []
 
@@ -233,7 +230,6 @@ class Lidar_sim:
 
     def Gauss_Newton(self):
         self.draw_map_from_graph()
-        print(self.pose_graph.edges)
         for itr in range(self.max_Gauss_Newton_iter):
             ov_sq_err = np.array([0, 0, 0]).astype(float)
             print(itr)
@@ -243,25 +239,28 @@ class Lidar_sim:
                 all_i_children = self.pose_graph[i, "children_id"]
                 for j in all_i_children:
                     err = self.error_func(i, self.pose_graph[i, "pos"], j, self.pose_graph[j, "pos"])
-                    ov_sq_err += err*err
+                    ov_sq_err += err * err
                     Jij = self.Jacobian(i, j)
                     A, B = Jij
-                    #print(i, j, err)
-                    OM = np.eye(3)*0.01
-                    #print("err.T @ A")
-                    #print(err.T @ OM @ A)
-                    #print("err.T @ B")
-                    #print(err.T @ OM @ B)
-                    #print("A.T @ A")
-                    #print(A.T @ OM @ A)
-                    #print("B.T @ B")
-                    #print(B.T @ OM @ B)
-                    #print("B.T @ A")
-                    #print(B.T @ OM @ A)
-                    #print("A.T@ B")
-                    #print(A.T @ OM @ B)
-                    #if j != i+1:
-                        #OM[2, :] = [2, 2, 2]
+                    # print(i, j, err)
+                    OM = np.eye(3) * self.pose_graph.edge_cov(i,j)
+                    #if self.pose_graph.edge_cov(i,j) > 0.4:
+                    #    print(i, j, err)
+
+                    # print("err.T @ A")
+                    # print(err.T @ OM @ A)
+                    # print("err.T @ B")
+                    # print(err.T @ OM @ B)
+                    # print("A.T @ A")
+                    # print(A.T @ OM @ A)
+                    # print("B.T @ B")
+                    # print(B.T @ OM @ B)
+                    # print("B.T @ A")
+                    # print(B.T @ OM @ A)
+                    # print("A.T@ B")
+                    # print(A.T @ OM @ B)
+                    # if j != i+1:
+                    # OM[2, :] = [2, 2, 2]
 
                     b[i * 3:(i + 1) * 3] += err.T @ OM @ A
                     b[j * 3:(j + 1) * 3] += err.T @ OM @ B
@@ -270,27 +269,29 @@ class Lidar_sim:
                     H[j * 3:(j + 1) * 3, i * 3:(i + 1) * 3] += B.T @ OM @ A
                     H[i * 3:(i + 1) * 3, j * 3:(j + 1) * 3] += A.T @ OM @ B
 
-            cv2.imshow("H", H*10)
+            cv2.imshow("H", H)
             cv2.waitKey(3)
-            #while cv2.waitKey(3) != 27:
+            # while cv2.waitKey(3) != 27:
             #    pass
-            #H[0:3, 0:3] += np.ones((3, 3))
+            # H[0:3, 0:3] += np.ones((3, 3))
             b = b.reshape(b.shape[0], 1)
-            #Q, R = np.linalg.qr(H)  # QR decomposition with qr function
-            #y = np.dot(Q.T, b)  # Let y=Q'.B using matrix multiplication
+            print(ov_sq_err)
+            # Q, R = np.linalg.qr(H)  # QR decomposition with qr function
+            # y = np.dot(Q.T, b)  # Let y=Q'.B using matrix multiplication
 
-
-            #for i in range(len(self.pose_graph) * 3):
+            # for i in range(len(self.pose_graph) * 3):
             #    for j in range(len(self.pose_graph) * 3):
             #        print(H[i, j], end='; ')
             #    print()
+            H = np.copy(H[3:, 3:])
+            b = np.copy(b[3:, 0])
             dx = np.linalg.lstsq(H, -b, rcond=-1)[0]
-            #dx[:3, :] = [[0], [0], [0]]
-            #print("H diag")
-            #print(np.linalg.det(H))
-            #print(list([H[i][i] for i in range(H.shape[0])]))
-            #print()
-            #print(b)
+            # print("H diag")
+            # print(np.linalg.det(H))
+            # print(list([H[i][i] for i in range(H.shape[0])]))
+            # print()
+            # print(b)
+            dx = np.append(np.array([[0], [0], [0]]), dx)
             self.pose_graph.pos = np.copy((self.pose_graph.pos.reshape(1, len(self.pose_graph) * 3) + dx.T).reshape(
                 len(self.pose_graph), 3))
         self.draw_map_from_graph()
@@ -305,7 +306,6 @@ class Lidar_sim:
             map = np.append(map, new, axis=0)
         pyplot.plot([p[0] for p in map], [p[1] for p in map], '.', label=f'new {2}')
         print(map.shape)
-
 
     def update_keys(self):
         """
