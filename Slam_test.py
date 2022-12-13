@@ -232,7 +232,7 @@ def split_objects(data):
     for i in range(1, len(lidar)):
         if lidar[i] > 5.5 or lidar[i - 1] > 5.5 or lidar[i] < 0.5 or lidar[i - 1] < 0.5:
             continue
-        if abs(lidar[i - 1] - lidar[i]) < 0.2:
+        if abs(lidar[i - 1] - lidar[i]) < 0.1:
             all_objects[-1].append(i - 1)
         else:
             all_objects.append([])
