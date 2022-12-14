@@ -48,6 +48,7 @@ class GuiControl:
         self.arm_screen = np.copy(self.arm_background)
 
         self.body_pos_background = np.array([[[20, 70, 190]] * int(0.2419*self.width)] * int(self.height*0.3846), dtype=np.uint8)
+        self.body_pos_screen_wh = [int(0.2419*self.width)//2, int(self.height*0.3846)//2]
         self.body_pos_screen = np.copy(self.body_pos_background)
         # arm parameters
         self.m2_ang_offset = - math.pi
@@ -72,6 +73,7 @@ class GuiControl:
         self.last_checked_pressed_keys = None
         self.robot.going_to_pos_sent = False
         self.current_cam_mode = True
+        self.grip_pos = 0.01
 
     def init_pygame(self):
         """
@@ -89,7 +91,7 @@ class GuiControl:
         Button(self.screen, x=0.6, y=0.897, width=0.08, height=0.06, color=(150, 255, 170), func=self.change_cam_mode)
         Button(self.screen, x=0.726, y=0.897, width=0.08, height=0.06, color=(150, 255, 170), func=self.print_arm)
         self.m1_slider = Slider(self.screen,
-                                min=-134, max=157, val=m1_ang,
+                                min=157, max=-134, val=m1_ang,
                                 x=0.556, y=0.641,
                                 width=0.403, height=0.025,
                                 color=(150, 160, 170),
@@ -115,7 +117,7 @@ class GuiControl:
                                 width=0.403, height=0.025,
                                 color=(150, 160, 170),
                                 func=self.change_m5_angle)
-        self.grip_slider = Slider(self.screen, min=0, max=2, val=grip,
+        self.grip_slider = Slider(self.screen, min=0.001, max=1.98, val=grip,
                                   x=0.556, y=0.833,
                                   width=0.403, height=0.025,
                                   color=(150, 160, 170),
@@ -265,6 +267,8 @@ class GuiControl:
         checks pressed keys and configure commands to send according to pressed keys
         :return:
         """
+        arm_rot = self.robot.arm[0]
+        grip = self.grip_pos
         pressed_keys = self.screen.pressed_keys
         fov = 0
         if pg.K_w in pressed_keys:
@@ -285,11 +289,30 @@ class GuiControl:
             side += 1
         if pg.K_e in pressed_keys:
             side -= 1
+
+        if pg.K_x in pressed_keys:
+            arm_rot -= 1
+        if pg.K_z in pressed_keys:
+            arm_rot += 1
+
+        if pg.K_g in pressed_keys:
+            if grip < 1:
+                grip = 1.98
+            else:
+                grip = 0.01
+
+
         self.move_speed[1] = side * self.move_speed_val
         if self.last_checked_pressed_keys != pressed_keys:
             self.robot.move_base(*self.move_speed)
             self.robot.going_to_target_pos = False
             self.last_checked_pressed_keys = pressed_keys[:]
+            if self.grip_pos != grip:
+                self.robot.move_arm(grip=grip)
+                self.grip_pos = grip
+        if self.robot.arm[0] != arm_rot:
+            self.robot.move_arm(m1=arm_rot)
+
 
     def update_lidar(self):
         """
@@ -305,7 +328,7 @@ class GuiControl:
                 else:
                     self.old_body_pos = buff
                     self.old_lidar = lidar
-                cent_y, cent_x = y * self.move_body_scale + 150, -x * self.move_body_scale + 150
+                cent_y, cent_x = y * self.move_body_scale + self.body_pos_screen_wh[0], -x * self.move_body_scale + self.body_pos_screen_wh[0]
                 cent_y = int(cent_y - 0.3 * self.move_body_scale * math.cos(ang + math.pi / 2))
                 cent_x = int(cent_x - 0.3 * self.move_body_scale * math.sin(ang + math.pi / 2))
                 for l in range(0, len(lidar), 5):
@@ -341,7 +364,7 @@ class GuiControl:
             cv2.circle(self.body_pos_screen, (x, y), 3, (100, 255, 100), -1)
             x, y, ang = self.robot.increment
             cv2.circle(self.body_pos_screen,
-                       (int(y * self.move_body_scale + 150), int(-x * self.move_body_scale + 150)),
+                       (int(y * self.move_body_scale + self.body_pos_screen_wh[0]), int(-x * self.move_body_scale + self.body_pos_screen_wh[1])),
                        max(1, int(0.05 * self.move_body_scale)), (255, 255, 255), -1)
             size = 30 * self.move_body_scale // 100
             xl1 = int(size * math.cos(ang + math.pi / 2))
@@ -354,26 +377,26 @@ class GuiControl:
             xw2 = int(size * math.cos(ang))
             yw2 = int(size * math.sin(ang))
 
-            x1 = int(y * self.move_body_scale + xl1 + xw1 + 150)
-            y1 = int(-x * self.move_body_scale + yl1 + yw1 + 150)
-            x2 = int(y * self.move_body_scale - xl2 + xw2 + 150)
-            y2 = int(-x * self.move_body_scale - yl2 + yw2 + 150)
+            x1 = int(y * self.move_body_scale + xl1 + xw1 + self.body_pos_screen_wh[0])
+            y1 = int(-x * self.move_body_scale + yl1 + yw1 + self.body_pos_screen_wh[1])
+            x2 = int(y * self.move_body_scale - xl2 + xw2 + self.body_pos_screen_wh[0])
+            y2 = int(-x * self.move_body_scale - yl2 + yw2 + self.body_pos_screen_wh[1])
             cv2.line(self.body_pos_screen, (x1, y1), (x2, y2), (255, 255, 255), 2)
-            x1 = int(y * self.move_body_scale + xl1 - xw1 + 150)
-            y1 = int(-x * self.move_body_scale + yl1 - yw1 + 150)
-            x2 = int(y * self.move_body_scale - xl2 - xw2 + 150)
-            y2 = int(-x * self.move_body_scale - yl2 - yw2 + 150)
+            x1 = int(y * self.move_body_scale + xl1 - xw1 + self.body_pos_screen_wh[0])
+            y1 = int(-x * self.move_body_scale + yl1 - yw1 + self.body_pos_screen_wh[1])
+            x2 = int(y * self.move_body_scale - xl2 - xw2 + self.body_pos_screen_wh[0])
+            y2 = int(-x * self.move_body_scale - yl2 - yw2 + self.body_pos_screen_wh[1])
             cv2.line(self.body_pos_screen, (x1, y1), (x2, y2), (255, 255, 255), 2)
 
-            x1 = int(y * self.move_body_scale + xw1 + xl1 + 150)
-            y1 = int(-x * self.move_body_scale + yw1 + yl1 + 150)
-            x2 = int(y * self.move_body_scale - xw2 + xl2 + 150)
-            y2 = int(-x * self.move_body_scale - yw2 + yl2 + 150)
+            x1 = int(y * self.move_body_scale + xw1 + xl1 + self.body_pos_screen_wh[0])
+            y1 = int(-x * self.move_body_scale + yw1 + yl1 + self.body_pos_screen_wh[1])
+            x2 = int(y * self.move_body_scale - xw2 + xl2 + self.body_pos_screen_wh[0])
+            y2 = int(-x * self.move_body_scale - yw2 + yl2 + self.body_pos_screen_wh[1])
             cv2.line(self.body_pos_screen, (x1, y1), (x2, y2), (255, 255, 255), 2)
-            x1 = int(y * self.move_body_scale + xw1 - xl1 + 150)
-            y1 = int(-x * self.move_body_scale + yw1 - yl1 + 150)
-            x2 = int(y * self.move_body_scale - xw2 - xl2 + 150)
-            y2 = int(-x * self.move_body_scale - yw2 - yl2 + 150)
+            x1 = int(y * self.move_body_scale + xw1 - xl1 + self.body_pos_screen_wh[0])
+            y1 = int(-x * self.move_body_scale + yw1 - yl1 + self.body_pos_screen_wh[1])
+            x2 = int(y * self.move_body_scale - xw2 - xl2 + self.body_pos_screen_wh[0])
+            y2 = int(-x * self.move_body_scale - yw2 - yl2 + self.body_pos_screen_wh[1])
             cv2.line(self.body_pos_screen, (x1, y1), (x2, y2), (255, 255, 255),
                      max(1, int(0.02 * self.move_body_scale)))
             self.update_lidar()
@@ -386,7 +409,7 @@ class GuiControl:
         :return:
         """
         self.target_body_pos = [int(x), int(y), 0]
-        x, y = (x - 150) / self.move_body_scale, (-y + 150) / self.move_body_scale
+        x, y = (x - self.body_pos_screen_wh[0]) / self.move_body_scale, (-y + self.body_pos_screen_wh[1]) / self.move_body_scale
         self.robot.go_to(y, x)
 
     def update_arm(self, scale=1.0):

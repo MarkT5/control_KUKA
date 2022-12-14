@@ -8,14 +8,15 @@ import scipy
 class PoseGrah:
     def __init__(self):
         self.edges = np.array(False)
-        self.edges_cov = []
+        self.edges_cov = np.array(False)
         self.edge_num = 0
         self.node_num = 0
         self.children_id = []
         self.edges_id = []
         self.objects = []
         self.lidars = []
-        self.available_attributes = ["pos", "object", "lidar", "children", "children_id", "edge", "mat_pos"]
+        self.available_attributes = ["pos", "object", "lidar", "children", "children_id", "edge", "mat_pos",
+                                     "lidar_mat_pos"]
         # self.node_weghts = np.array()
 
     def __getitem__(self, item):
@@ -42,6 +43,8 @@ class PoseGrah:
                 return self.lidars[ind]
             if item[1] == "mat_pos":
                 return self.homogen_matrix_from_pos(self.pos[ind])
+            if item[1] == "lidar_mat_pos":
+                return self.homogen_matrix_from_pos(self.pos[ind], True)
             if item[1] == "children":
                 return self.children_id[ind], self.edges_id[ind]
             if item[1] == "children_id":
@@ -91,7 +94,6 @@ class PoseGrah:
                 self.edges[self.edges_id[ind][self.children_id[ind].index(child)]] = np.dot(A, B)
                 self.edges_cov[self.edges_id[ind][self.children_id[ind].index(child)]] = value[1]
 
-
     def __len__(self):
         return self.node_num
 
@@ -105,7 +107,7 @@ class PoseGrah:
             if key[1] not in self.available_attributes:
                 raise AttributeError(f"no attribute {key[1]} in PoseGraph")
 
-    def edge(self, i, j, /, pos_form=False):
+    def edge(self, i, j):
         if i < 0:
             i += self.node_num
         if j < 0:
@@ -113,13 +115,9 @@ class PoseGrah:
         parent_child = sorted([i, j])
         if parent_child[1] not in self.children_id[parent_child[0]]:
             raise AttributeError(f"no edge {i}, {j}")
-        if pos_form:
-            return self.pos_vector_from_homogen_matrix(
-                self.edges[self.edges_id[parent_child[0]][self.children_id[parent_child[0]].index(parent_child[1])]])
-        else:
-            return self.edges[self.edges_id[parent_child[0]][self.children_id[parent_child[0]].index(parent_child[1])]]
+        return self.edges[self.edges_id[parent_child[0]][self.children_id[parent_child[0]].index(parent_child[1])]]
 
-    def edge_cov(self, i, j, /, pos_form=False):
+    def edge_cov(self, i, j):
         if i < 0:
             i += self.node_num
         if j < 0:
@@ -129,8 +127,7 @@ class PoseGrah:
             raise AttributeError(f"no edge {i}, {j}")
         return self.edges_cov[self.edges_id[parent_child[0]][self.children_id[parent_child[0]].index(parent_child[1])]]
 
-
-    def add_node(self, parent_id, pos, object, lidar):  # pos, object, lidar, children[child id, edge id]]
+    def add_node(self, parent_id, pos, object, lidar, /, cov=np.array(False)):  # pos, object, lidar, children[child id, edge id]]
         self.objects.append(object)
         self.lidars.append(lidar)
         self.children_id.append([])
@@ -139,15 +136,20 @@ class PoseGrah:
         if self.node_num == 0:
             self.pos = np.array([pos]).astype(np.double)
         else:
+            parent_id = int(parent_id)
             if parent_id < 0:
                 parent_id += self.node_num
             self.check_attribute(parent_id)
+            if cov.any():
+                self.add_edge(parent_id, pos, self.node_num, cov)
+            else:
+                self.add_edge(parent_id, pos, self.node_num)
+            if isinstance(pos, np.ndarray):
+                pos = self.pos_vector_from_homogen_matrix(pos)
             self.pos = np.append(self.pos, [pos], axis=0).astype(np.double)
-            self.add_edge(parent_id, pos, self.node_num)
-
         self.node_num += 1
 
-    def add_edge(self, parent_id, to_n, child_id, cov=0.01):
+    def add_edge(self, parent_id, to_n, child_id, cov=np.array([[0.1, 0, 0], [0, 0.1, 0], [0, 0, 0.6]])):
         parent_id = int(parent_id)
         child_id = int(child_id)
         if child_id < 0:
@@ -165,14 +167,20 @@ class PoseGrah:
             B = to_n.astype(np.double)
         if self.edge_num > 0:
             self.edges = np.append(self.edges, [np.dot(A, B)], axis=0).astype(np.double)
-            self.edges_cov.append(cov)
+            self.edges_cov = np.append(self.edges, [cov], axis=0).astype(np.double)
         else:
             self.edges = np.array([np.dot(A, B)]).astype(np.double)
-            self.edges_cov.append(cov)
+            self.edges_cov = np.array([cov]).astype(np.double)
         self.edge_num += 1
 
-    def homogen_matrix_from_pos(self, pos):
+    def homogen_matrix_from_pos(self, pos, for_lidar=False):
         x, y, rot = pos
+        cr = math.cos(rot)
+        sr = math.sin(rot)
+        if not for_lidar:
+            return np.array([[cr, -sr, x],
+                             [sr, cr, y],
+                             [0, 0, 1]]).astype(np.double)
         robot_rad = 0.3
         X = np.array([[1, 0, x],
                       [0, 1, y],
@@ -182,12 +190,6 @@ class PoseGrah:
                       [0, 1, 0],
                       [0, 0, 1]]).astype(np.double)
 
-        cr = math.cos(rot)
-        sr = math.sin(rot)
-        #if abs(cr) < 1e-16:
-        #    cr = 0
-        #if abs(sr) < 1e-16:
-        #    sr = 0
         rot = np.array([[cr, -sr, 0],
                         [sr, cr, 0],
                         [0, 0, 1]]).astype(np.double)
@@ -195,10 +197,26 @@ class PoseGrah:
         X = np.dot(X, np.dot(rot, f))
         return X
 
+    def undo_lidar(self, mat):
+        cr = mat[0, 0]
+        sr = mat[1, 0]
+        robot_rad = 0.3
+        f = np.array([[1, 0, robot_rad],
+                      [0, 1, 0],
+                      [0, 0, 1]]).astype(np.double)
+
+        rot = np.array([[cr, -sr, 0],
+                        [sr, cr, 0],
+                        [0, 0, 1]]).astype(np.double)
+
+        mat = np.dot(mat, np.linalg.inv(np.dot(rot, f)))
+        mat[:2, :2] = [[cr, -sr], [sr, cr]]
+        return mat
+
     def pos_vector_from_homogen_matrix(self, mat):
         aco = math.acos(max(-1, min(1, mat[0, 0])))
         asi = math.asin(max(-1, min(1, mat[1, 0])))
-        asi_sign = 1 - 2 * (asi > 0)
+        asi_sign = -1 + 2 * (asi > 0)
         return np.array([*mat[:2, 2], aco * (asi_sign)]).astype(float)
 
     def find_n_closest(self, node_num, n):

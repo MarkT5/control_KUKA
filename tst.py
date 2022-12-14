@@ -9,7 +9,7 @@ def dance1():
     robot.move_arm(-0, 0, -40, 0, 0, 2, arm_ID=0)
     time.sleep(0.1)
     robot.move_arm(0, -45, -75, 0, 0, arm_ID=1)
-    time.sleep(2)
+    time.sleep(5)
     genius = 0
     speed = 0.02
     rot_speed=0
@@ -69,7 +69,7 @@ def dance2():
     robot.move_arm(-0, 0, -40, 0, 0, 2, arm_ID=0)
     time.sleep(0.1)
     robot.move_arm(0, -45, -75, 0, 0, arm_ID=1)
-    time.sleep(2)
+    time.sleep(5)
     genius = 0
     speed = 0.02
     rot_speed = 0

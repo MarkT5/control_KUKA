@@ -107,7 +107,6 @@ class Slider:
         self.slider_color = slider_color
         self.min = min
         self.max = max
-        print(self.x, self.y, self.width, self.height)
         self.slider_rad = self.height // 2
         self.slider_y = self.slider_rad
         self.surf = pg.Surface((self.width, self.height))

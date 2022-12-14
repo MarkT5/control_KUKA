@@ -209,20 +209,18 @@ class KUKA:
         ssh.send(b"screen -S roslaunch\n")
         debug("roslaunch screen created")
         time.sleep(0.5)
-        ssh.send(b"roslaunch youbot_tl_test ytl.launch\n")
+        ssh.send(b"roslaunch youbot_tl_test ytl_2arm.launch\n")
         ssh_msg = ""
         ln_ind = 0
         debug("waiting ros to start...")
 
-        for i in range(1000):
+        for i in range(10000):
             ssh_msg += ssh.recv(1).decode("utf-8")
-            if ssh_msg.count("First ROS iter OK"):
-                debug("Streaming data")
-                time.sleep(10)
+            if ssh_msg.count("System has"):
+                debug("OK")
+                time.sleep(1)
                 client.close()
                 return
-        self.connected = False
-        self.operating = False
         client.close()
 
     # receiving and parsing sensor data
