@@ -24,7 +24,6 @@ class Button:
                  height=10,
                  func=lambda *args: args,
                  color=(100, 100, 100)):
-
         self.func = func
         self.par_surf = par_surf
         self.ps_width, self.ps_height = par_surf.width, par_surf.height
@@ -67,7 +66,7 @@ class Text:
         self.inp_text = inp_text
         self.text = inp_text
         self.color = color
-        self.text = pg.font.SysFont(font, int(font_size * self.ps_height/500))
+        self.text = pg.font.SysFont(font, int(font_size * self.ps_height / 500))
         self.surf = self.text.render(self.inp_text(), False, self.color)
         self.rect = par_surf.add_object(self)
 
@@ -149,13 +148,15 @@ class Mat:
                  func=lambda *args: args,
                  x=0,
                  y=0,
+                 width=0,
+                 height=0,
                  cv_mat_stream=None):
         self.par_surf = par_surf
         self.ps_width, self.ps_height = par_surf.width, par_surf.height
         self.x = int(x * self.ps_width)
         self.y = int(y * self.ps_height)
-        #self.width = int(width * self.ps_width)
-        #self.height = int(height * self.ps_height)
+        self.width = int(width * self.ps_width)
+        self.height = int(height * self.ps_height)
         self.func = lambda *args: args
         self.is_mat_stream = False
         self.last_hover_pos = (0, 0)
@@ -172,7 +173,11 @@ class Mat:
     @property
     def surf(self):
         mat = self.cv_mat_stream()
-        surf = pg.transform.flip(pg.transform.rotate(pg.surfarray.make_surface(mat), -90), 1, 0)
+        if self.width != 0 and self.height != 0:
+            surf = pg.transform.flip(pg.transform.scale(pg.transform.rotate(pg.surfarray.make_surface(mat), -90),
+                                     (self.width, self.height)), 1, 0)
+        else:
+            surf = pg.transform.flip(pg.transform.rotate(pg.surfarray.make_surface(mat), -90), 1, 0)
         return surf
 
     def update(self):

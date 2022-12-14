@@ -71,7 +71,7 @@ class GuiControl:
         self.old_body_pos = [0, 0, 0]
         self.last_checked_pressed_keys = None
         self.robot.going_to_pos_sent = False
-        self.current_cam_mode = False
+        self.current_cam_mode = True
 
     def init_pygame(self):
         """
@@ -86,8 +86,8 @@ class GuiControl:
         else:
             m1_ang, m2_ang, m3_ang, m4_ang, m5_ang, grip = 0, 0, 0, 0, 0, 0
         self.screen = Screen(self.width, self.height)
-        Button(self.screen, x=0.6, y=0.897, width=0.08, height=0.04, color=(150, 255, 170), func=self.change_cam_mode)
-        Button(self.screen, x=0.726, y=0.897, width=0.08, height=0.04, color=(150, 255, 170), func=self.print_arm)
+        Button(self.screen, x=0.6, y=0.897, width=0.08, height=0.06, color=(150, 255, 170), func=self.change_cam_mode)
+        Button(self.screen, x=0.726, y=0.897, width=0.08, height=0.06, color=(150, 255, 170), func=self.print_arm)
         self.m1_slider = Slider(self.screen,
                                 min=-134, max=157, val=m1_ang,
                                 x=0.556, y=0.641,
@@ -121,7 +121,7 @@ class GuiControl:
                                   color=(150, 160, 170),
                                   func=self.change_grip)
 
-        self.robot_cam_pygame = Mat(self.screen, x=0, y=0, cv_mat_stream=self.robot.camera_BGR)
+        self.robot_cam_pygame = Mat(self.screen, x=0, y=0, width=0.5261, height=0.6154, cv_mat_stream=self.cam_stream)
         self.body_pos_pygame = Mat(self.screen, x=0, y=0.615, cv_mat_stream=self.body_pos_stream,
                                    func=self.update_body_pos)
         self.arm_pygame = Mat(self.screen, x=0.516, y=0, cv_mat_stream=self.arm_stream, func=self.mouse_on_arm)
@@ -143,11 +143,18 @@ class GuiControl:
         """
         When called changes camera mode to different from current
         """
-        if self.current_cam_mode:
-            self.robot_cam_pygame.cv_mat_stream = self.robot.camera_BGR
-        else:
-            self.robot_cam_pygame.cv_mat_stream = self.robot.depth_camera
         self.current_cam_mode = not self.current_cam_mode
+
+    def cam_stream(self, *args):
+        """
+        service function for correct work with CvMat
+        :return: map CvMat
+        """
+
+        if self.current_cam_mode:
+            return self.robot.camera_BGR()
+        else:
+            return self.robot.depth_camera()
 
     def change_robot(self, *args):
         self.curr_robot += 1
