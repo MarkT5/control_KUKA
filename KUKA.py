@@ -52,6 +52,8 @@ class KUKA:
         :param camera_enable: enables mjpeg client if True
         """
         self.operating = True
+        self.camera_enable = camera_enable
+        self.read_depth = read_depth
         self.ip = ip
         self.frequency = 90  # operating frequency
 
@@ -119,6 +121,8 @@ class KUKA:
                 self.data_thr.start()
                 self.send_thr.start()
                 debug("connected *maybe* to 7777 (data stream)")
+                self.check_active_nodes_via_ssh()
+
                 break
 
             except:
@@ -129,14 +133,14 @@ class KUKA:
 
         # connecting to video server
         if self.connected:
-            if camera_enable:
-                if read_depth:
+            if self.camera_enable:
+                if self.read_depth :
                     self.init_depth_client()
                 self.init_rgb_client()
 
         # waiting for initial arm position
         if self.connected:
-            debug("waiting for initial arm position")
+            #debug("waiting for initial arm position")
             self.corr_arm_pos = [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]]
             self.arm_pos[0][:-1] = self.corr_arm_pos[0]
             self.arm_pos[1][:-1] = self.corr_arm_pos[1]
@@ -172,6 +176,53 @@ class KUKA:
         self.cam_depth_thr = thr.Thread(target=self.get_frame_depth, args=())
         self.cam_depth_thr.start()
 
+    def check_active_nodes_via_ssh(self, /, user='youbot', password='111111'):
+        """
+        Connects to KUKA youbot via SSH client and checks rostopics
+
+        :param user: youbot by default
+        :param password: 111111 by default
+        """
+        port = 22
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        if self.ip[-1] == "1":
+            password = "111111"
+        elif self.ip[-1] == "3":
+            password = "0987654321"
+        elif self.ip[-1] == "4":
+            password = "112233"
+        elif self.ip[-1] == "5":
+            password = "111111"
+        try:
+            client.connect(hostname=self.ip, username=user, password=password, port=port)
+        except Exception as err:
+            debug(err)
+            self.connected = False
+            self.operating = False
+            return
+        ssh = client.invoke_shell()
+        time.sleep(0.5)
+        ssh.send(b"sudo -s\n")
+        time.sleep(0.5)
+        ssh.send(password.encode("utf-8") + b"\n")
+        time.sleep(0.5)
+        ssh.send(b"rostopic list\n")
+        time.sleep(2)
+        rostopic = ssh.recv(10000).decode("utf-8")
+        if rostopic.count("camera/rgb/image_raw"):
+            self.camera_enable = True
+            debug("RGB camera is active")
+        else:
+            debug("WARN: RGB camera is inactive")
+            self.camera_enable = False
+        if rostopic.count("camera/depth/image"):
+            self.read_depth = True
+            debug("depth camera is active")
+        else:
+            debug("WARN: depth camera is inactive")
+            self.read_depth = False
+
     def connect_ssh(self, /, user='youbot', password='111111'):
         """
         Connects to KUKA youbot via SSH client and starts ROS
@@ -192,7 +243,8 @@ class KUKA:
             password = "111111"
         try:
             client.connect(hostname=self.ip, username=user, password=password, port=port)
-        except:
+        except Exception as err:
+            debug(err)
             self.connected = False
             self.operating = False
             return
@@ -211,17 +263,21 @@ class KUKA:
         time.sleep(0.5)
         ssh.send(b"roslaunch youbot_tl_test ytl_2arm.launch\n")
         ssh_msg = ""
-        ln_ind = 0
-        debug("waiting ros to start...")
 
+        debug("waiting ros to start...")
         for i in range(10000):
             ssh_msg += ssh.recv(1).decode("utf-8")
             if ssh_msg.count("System has"):
-                debug("OK")
+                debug("ros started")
                 time.sleep(1)
                 client.close()
-                return
+                break
+            if ssh_msg.count("System has 0"):
+                debug("WARN: no arms connected")
+
         client.close()
+        time.sleep(0.5)
+
 
     # receiving and parsing sensor data
 
@@ -259,7 +315,6 @@ class KUKA:
                     send_ind = 0
                 time.sleep(1 / self.frequency)
             if self.connected:
-                print(to_send)
                 self.conn.send(to_send)
             else:
                 debug(f"message:{to_send}")
@@ -426,7 +481,7 @@ class KUKA:
 
         :return: MJPEG BGR image
         """
-        if self.connected:
+        if self.connected and self.camera_enable:
             self.cam_rgb_lock.acquire()
             out = self.cam_image_BGR
             self.cam_rgb_lock.release()
@@ -440,7 +495,7 @@ class KUKA:
 
         :return: MJPEG depth image
         """
-        if self.connected:
+        if self.connected and self.read_depth:
             self.cam_depth_lock.acquire()
             out = self.cam_depth
             self.cam_depth_lock.release()
@@ -668,31 +723,39 @@ class KUKA:
         Reads from color video server and writes to RGB and BGR camera variables (thread)
         """
         while self.operating:
-            buf_rgb = self.client_rgb.dequeue_buffer()
-            image = Image.open(io.BytesIO(buf_rgb.data))
-            imageBGR = np.array(image)
+            try:
+                buf_rgb = self.client_rgb.dequeue_buffer()
+                image = Image.open(io.BytesIO(buf_rgb.data))
+                imageBGR = np.array(image)
 
-            imageRGB = cv2.cvtColor(np.array(image), cv2.COLOR_BGR2RGB)
-            self.client_rgb.enqueue_buffer(buf_rgb)
+                imageRGB = cv2.cvtColor(np.array(image), cv2.COLOR_BGR2RGB)
+                self.client_rgb.enqueue_buffer(buf_rgb)
 
-            self.cam_rgb_lock.acquire()
-            self.cam_image = imageRGB
-            self.cam_image_BGR = imageBGR
-            self.cam_rgb_lock.release()
+                self.cam_rgb_lock.acquire()
+                self.cam_image = imageRGB
+                self.cam_image_BGR = imageBGR
+                self.cam_rgb_lock.release()
+            except Exception as err:
+                debug(err)
+                return
 
     def get_frame_depth(self):
         """
         Reads from depth video server and writes to depth camera variable (thread)
         """
-        while self.operating:
-            buf_depth = self.client_depth.dequeue_buffer()
-            image_depth = np.array(Image.open(io.BytesIO(buf_depth.data)))
-            # image_depth = cv2.cvtColor(np.array(image_depth), cv2.COLOR_BGR2GRAY)
-            self.client_depth.enqueue_buffer(buf_depth)
+        try:
+            while self.operating:
+                buf_depth = self.client_depth.dequeue_buffer()
+                image_depth = np.array(Image.open(io.BytesIO(buf_depth.data)))
+                # image_depth = cv2.cvtColor(np.array(image_depth), cv2.COLOR_BGR2GRAY)
+                self.client_depth.enqueue_buffer(buf_depth)
 
-            self.cam_depth_lock.acquire()
-            self.cam_depth = image_depth
-            self.cam_depth_lock.release()
+                self.cam_depth_lock.acquire()
+                self.cam_depth = image_depth
+                self.cam_depth_lock.release()
+        except Exception as err:
+            debug(err)
+        return
 
     def __del__(self):
         """
