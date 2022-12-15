@@ -24,9 +24,11 @@ class Lidar_sim:
 
         self.move_body_scale = 60
         self.wall_lines = []
-        self.pause = False
-        self.space_clk = False
+        self.pause = True
+        self.old_keys = []
         self.step = True
+        self.show_plot = False
+        self.next_obj = False
 
         f = open(inp_file_name, "r")
         txt_log_data = f.read().split('\n')
@@ -89,25 +91,24 @@ class Lidar_sim:
         self.init_pygame()
         while self.screen.running:
             self.update_keys()
-            if self.step and not self.pause:
-                self.step = False
-                self.body_pos_screen = np.copy(self.body_pos_background)
-                self.update_body_pos()
-
+            if self.step:
                 self.odom, self.lidar = self.log_data[self.log_data_ind]
-
                 self.m1_slider.set_val(self.log_data_ind)
-                self.update_lidar()
+                self.step = False
                 self.process_SLAM()
+                self.update_screen()
 
-                if self.log_data_ind + 1 < len(self.log_data):
-                    self.log_data_ind += 1
-                    self.step = True
-                else:
-                    self.Gauss_Newton()
-
+                if not self.pause:
+                    if self.log_data_ind + 1 < len(self.log_data):
+                        self.log_data_ind += 1
+                        self.step = True
+                    else:
+                        self.Gauss_Newton()
+                        self.draw_pg_map_from_graph()
             self.screen.step()
-            #self.clock.tick(10)
+            # self.clock.tick(10)
+
+
 
     def view(self, from_n, to_n):
         A = np.linalg.inv(from_n)
@@ -159,18 +160,16 @@ class Lidar_sim:
 
         if not object_coords:
             return
-        if math.sqrt((x - xo) ** 2 + (y - yo) ** 2) > 0.1 or abs(r - ro) > 0.1 or len(self.pose_graph) == 0:
-            # self.pose_graph.add_node(-1, self.odom, None, self.lidar)
+        if math.sqrt((x - xo) ** 2 + (y - yo) ** 2) > 0.01 or abs(r - ro) > 0.01 or len(self.pose_graph) == 0:
             if len(self.pose_graph) < 2:
                 self.pose_graph.add_node(-1, self.odom, None, self.lidar)
                 return
-
             _, cl_points = self.pose_graph.find_n_closest(-1, 300)
             if isinstance(cl_points, int):
                 cl_points = [cl_points]
 
             for obj in object_coords:
-                self.draw_line_from_point_cloud(obj)
+
                 peaks = douglas_peucker(obj, True)
                 for nn in cl_points:
                     if len(peaks[0]) >= 3:
@@ -181,28 +180,44 @@ class Lidar_sim:
                             weight_vector = self.generate_weight_vector(peaks)
                             icp_out = icp(obj[peaks[0][0]:peaks[0][-1]], np.array(self.pose_graph[nn, "object"]),
                                           weight_vector=[weight_vector])
+                            self.update_screen()
+                            self.draw_line_from_point_cloud(obj[peaks[0][0]:peaks[0][-1]])
+                            self.draw_line_from_point_cloud(self.pose_graph[nn, "object"], (255, 0, 0))
                             # draw icp
-                            if icp_out[-1] and icp_out[-1] < 0.02:
+                            if icp_out[-1] and icp_out[-1] < 0.03:
                                 err = self.pose_graph.pos_vector_from_homogen_matrix(icp_out[0])
-                                if err[0] ** 2 + err[1] ** 2 > 2 or abs(err[2]) > 0.8:
-                                    return
+                                if err[0] ** 2 + err[1] ** 2 > 0.4 or abs(err[2]) > 0.8:
+                                    continue
                                 print(err, icp_out[-1])
-                                corrected_odom = self.pose_graph.undo_lidar(np.dot(icp_out[0], self.pose_graph[-1, "lidar_mat_pos"]).astype(np.double))
+                                corrected_odom = self.pose_graph.undo_lidar(
+                                    np.dot(icp_out[0], self.pose_graph[-1, "lidar_mat_pos"]).astype(np.double))
                                 if nn == len(self.pose_graph) - 2:
-                                    self.pose_graph[nn, "edge", -1] = (corrected_odom, np.array([[0.001, 0, 0], [0, 0.001, 0], [0, 0, 0.001]]))  # [parent, "edge", child] = value
+                                    self.pose_graph[nn, "edge", -1] = (corrected_odom, np.array(
+                                        [[0.001, 0, 0], [0, 0.001, 0],
+                                         [0, 0, 0.0001]]))  # [parent, "edge", child] = value
                                 else:
-                                    self.pose_graph.add_edge(nn, corrected_odom, -1, np.array([[0.001, 0, 0], [0, 0.001, 0], [0, 0, 0.001]]))
+                                    self.pose_graph.add_edge(nn, corrected_odom, -1,
+                                                             np.array([[0.001, 0, 0], [0, 0.001, 0], [0, 0, 0.0001]]))
                                 self.pose_graph[-1, "object"] = obj[peaks[0][0]:peaks[0][-1]]
-                                if False:
-                                    pyplot.plot([p[0] for p in obj[peaks[0][0]:peaks[0][-1]]], [p[1] for p in obj[peaks[0][0]:peaks[0][-1]]], 'o',
-                                              label='points 2')
-                                    converted = np.concatenate(split_objects([np.dot(icp_out[0], self.pose_graph[-1, "lidar_mat_pos"]), self.lidar]))
-                                    pyplot.plot([p[0] for p in converted], [p[1] for p in converted], 'o', label='converted')
-                                    pyplot.plot([p[0] for p in self.pose_graph[nn, "object"]], [p[1] for p in self.pose_graph[nn, "object"]], '.', label='src')
+                                if self.show_plot:
+                                    pyplot.plot([p[0] for p in obj[peaks[0][0]:peaks[0][-1]]],
+                                                [p[1] for p in obj[peaks[0][0]:peaks[0][-1]]], 'o',
+                                                label='points 2')
+                                    converted = np.concatenate(split_objects(
+                                        [np.dot(icp_out[0], self.pose_graph[-1, "lidar_mat_pos"]), self.lidar]))
+                                    pyplot.plot([p[0] for p in converted], [p[1] for p in converted], 'o',
+                                                label='converted')
+                                    pyplot.plot([p[0] for p in self.pose_graph[nn, "object"]],
+                                                [p[1] for p in self.pose_graph[nn, "object"]], '.', label='src')
                                     pyplot.axis('equal')
                                     pyplot.legend(numpoints=1)
                                     pyplot.show()
-                                return
+                            #while not self.next_obj:
+                            #    self.update_keys()
+                            #    self.screen.step()
+                            #    self.clock.tick(10)
+                            #self.next_obj = False
+            self.show_plot = False
             if math.sqrt((x - xo) ** 2 + (y - yo) ** 2) > 0.2 or abs(r - ro) > 0.3 and not node_created:
                 self.pose_graph.add_node(-1, self.odom, None, self.lidar)
             self.last_odom = self.odom
@@ -249,8 +264,8 @@ class Lidar_sim:
                     Jij = self.Jacobian(i, j)
                     A, B = Jij
                     # print(i, j, err)
-                    OM = np.eye(3) * self.pose_graph.edge_cov(i,j)
-                    #if self.pose_graph.edge_cov(i,j) > 0.4:
+                    OM = np.eye(3) * self.pose_graph.edge_cov(i, j)
+                    # if self.pose_graph.edge_cov(i,j) > 0.4:
                     #    print(i, j, err)
 
                     # print("err.T @ A")
@@ -308,10 +323,21 @@ class Lidar_sim:
     def draw_map_from_graph(self):
         map = np.concatenate(split_objects([self.pose_graph[1, "lidar_mat_pos"], self.pose_graph[1, "lidar"]]), axis=0)
         for i in range(1, len(self.pose_graph)):
-            new = np.concatenate(split_objects([self.pose_graph[i, "lidar_mat_pos"], self.pose_graph[i, "lidar"]]), axis=0)
+            new = np.concatenate(split_objects([self.pose_graph[i, "lidar_mat_pos"], self.pose_graph[i, "lidar"]]),
+                                 axis=0)
             map = np.append(map, new, axis=0)
         pyplot.plot([p[0] for p in map], [p[1] for p in map], '.', label=f'new {2}')
         print(map.shape)
+
+    def draw_pg_map_from_graph(self):
+        for i in range(1, len(self.pose_graph)):
+            self.draw_lidar(self.pose_graph[i, "pos"], self.pose_graph[i, "lidar"], (255,255,255))
+
+
+    def update_screen(self):
+        self.body_pos_screen = np.copy(self.body_pos_background)
+        self.update_body_pos()
+        self.update_lidar()
 
     def update_keys(self):
         """
@@ -319,18 +345,21 @@ class Lidar_sim:
         :return:
         """
         pressed_keys = self.screen.pressed_keys
-        if pg.K_SPACE in pressed_keys:
-            if not self.space_clk:
+        if self.old_keys != pressed_keys:
+            if pg.K_SPACE in pressed_keys:
+                self.step = True
                 self.pause = not self.pause
-                self.space_clk = True
-        elif pg.K_SPACE not in pressed_keys:
-            self.space_clk = False
-        if pg.K_LEFT in pressed_keys:
-            self.log_data_ind -= 1
-            self.step = True
-        if pg.K_RIGHT in pressed_keys:
-            self.log_data_ind += 1
-            self.step = True
+            if pg.K_LEFT in pressed_keys:
+                self.log_data_ind -= 1
+                self.step = True
+            if pg.K_RIGHT in pressed_keys:
+                self.log_data_ind += 1
+                self.step = True
+            if pg.K_p in pressed_keys:
+                self.show_plot = True
+            if pg.K_n in pressed_keys:
+                self.next_obj = True
+            self.old_keys = pressed_keys[:]
 
     def update_lidar(self):
         """
@@ -341,17 +370,16 @@ class Lidar_sim:
         lidar = self.lidar
         self.draw_lidar(odom, lidar)
 
-    def draw_lidar(self, odom, lidar):
+    def draw_lidar(self, odom, lidar, color=(20, 90, 210)):
         x, y, ang = odom
         if lidar:
             cent_y, cent_x = y * self.move_body_scale + self.width // 2, -x * self.move_body_scale + self.width // 2
             cent_y = int(cent_y - 0.3 * self.move_body_scale * math.cos(ang + math.pi / 2))
             cent_x = int(cent_x - 0.3 * self.move_body_scale * math.sin(ang + math.pi / 2))
-            for l in range(0, len(lidar), 1):
-                if not 0.01 < lidar[l] < 5.5:
+            for l in range(0, len(lidar)):
+                if not 0.9 < lidar[l] < 5.5:
                     continue
-                color = (0, max(255, 255 - int(45.5 * l)), min(255, int(45.5 * l)))
-                color = (20, 90, 210)
+                #color = (0, max(255, 255 - int(45.5 * l)), min(255, int(45.5 * l)))
                 cv2.ellipse(self.body_pos_screen, (cent_y, cent_x),
                             (int(lidar[l] * self.move_body_scale), int(lidar[l] * self.move_body_scale)),
                             math.degrees(ang), 30 + int(-240 / len(lidar) * l), 30 + int(-240 / len(lidar) * (l + 1)),

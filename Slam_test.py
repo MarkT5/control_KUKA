@@ -372,7 +372,7 @@ def binary_search(arr, x):
 
 
 def douglas_peucker(points, only_peaks=False):
-    iters = 20
+    iters = 4
     min_weight = iters * len(points) // 15
     point_list = [0, len(points) - 1]
     weights = [0]
