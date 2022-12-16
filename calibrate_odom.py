@@ -1,6 +1,11 @@
 import cv2
 import numpy as np
 import scipy
+import math
+from KUKA import KUKA
+import time
+
+robot = KUKA('192.168.88.23', ros=False, offline=False)
 
 
 def mouse(event, x, y, flags, param):
@@ -18,6 +23,8 @@ def mouse(event, x, y, flags, param):
 
 vid_coords = np.array(False)
 
+correction = [0, 0, 0]
+
 corners_coords = np.array([[0, 0, 1], [3300, 0, 1], [3300, 3300, 1], [0, 3300, 1]])
 mouseX, mouseY = 0, 0
 vid = cv2.VideoCapture(0)
@@ -33,10 +40,10 @@ blue_upper_bound = np.array([133, 246, 200])
 yellow_lower_bound = np.array([12, 66, 87])
 yellow_upper_bound = np.array([29, 255, 255])
 
-conv = np.array(False)
-#conv = np.array([[8.53725016e-02, -9.49768794e+00, 4.92895853e+03],
-#                 [-8.49742837e+00, 3.81768521e+00, 5.58478086e+03],
-#                 [-1.30828431e-04, 2.47205973e-03, 1.00000000e+00]])
+# conv = np.array(False)
+conv = np.array([[6.28302929e-02, -6.28928085e+00, 3.40162119e+03],
+                 [-6.11168532e+00, 2.51195914e+00, 4.81927110e+03],
+                 [3.16546358e-05, 1.56344310e-03, 1.00000000e+00]])
 if not conv.any():
     while True:
         ret, frame = vid.read()
@@ -95,11 +102,111 @@ def find_robot(hsv):
     return cent_X, cent_Y, back_X, back_Y
 
 
+def find_robot_abs():
+    cent_X, cent_Y, back_X, back_Y = find_robot(hsv)
+    r_coord = np.array([cent_X, cent_Y, 1, back_X, back_Y, 1]).reshape((2, 3))
+    # print(r_coord.T)
+    r_coord = np.dot(conv, (r_coord.T)).T
+    yfc, xfc, den_f, yrc, xrc, den_r = r_coord.reshape(6)
+    xfc /= den_f
+    yfc /= den_f
+    xrc /= den_r
+    yrc /= den_r
+    ang = math.atan2(yfc - yrc, xfc - xrc)
+    return xfc, yfc, ang, xrc, yrc
+
+
+centering = 1
+cent_cycles = 5
+
+inv_rob_mat = np.array(False)
+def center_robot():
+    global centering
+    global inv_rob_mat
+
+    if not robot.going_to_target_pos:
+        print("check pos")
+        time.sleep(1)
+        x, y, ang, _, _ = find_robot_abs()
+        cr = math.cos(ang)
+        sr = math.sin(ang)
+        x -= 1650
+        y -= 1650
+        if centering == 1:
+            inv_rob_mat = np.linalg.inv(np.array([[cr, -sr, x / 1000],
+                                                  [sr, cr, y / 1000],
+                                                  [0, 0, 1]]))
+            aco = math.acos(max(-1, min(1, inv_rob_mat[0, 0])))
+            asi = math.asin(max(-1, min(1, inv_rob_mat[1, 0])))
+            asi_sign = -1 + 2 * (asi > 0)
+            xi, yi, angi = np.array([*inv_rob_mat[:2, 2], aco * (asi_sign)]).astype(float)
+            print("correct error")
+            print(xi, yi, angi)
+            robot.go_to(xi, yi, angi)
+        elif centering > 1:
+            err_mat = np.linalg.inv(np.array([[cr, -sr, x / 1000],
+                                                  [sr, cr, y / 1000],
+                                                  [0, 0, 1]]))
+            err_mat = inv_rob_mat @ err_mat
+            aco = math.acos(max(-1, min(1, err_mat[0, 0])))
+            asi = math.asin(max(-1, min(1, err_mat[1, 0])))
+            asi_sign = -1 + 2 * (asi > 0)
+            xi, yi, angi = np.array([*err_mat[:2, 2], aco * (asi_sign)]).astype(float)
+            print("correct post error")
+            print(xi, yi, angi)
+            robot.go_to(xi, yi, angi)
+        centering += 1
+
+
+def rand_pos():
+    x, y, ang = np.random.random(3)
+    x = (x - 0.5) * 3
+    y = (y - 0.5) * 3
+    ang = (ang - 0.5) * 2 * 3.1415
+    return x, y, ang
+
+
+x, y, z = rand_pos()
 while True:
+    xr, yr, zr, = robot.increment
     ret, frame = vid.read()
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     frame = cv2.polylines(frame, [test_rect], True, (255, 255, 255), 1)
     cent_X, cent_Y, back_X, back_Y = find_robot(hsv)
+    xfc, yfc, ang, xrc, yrc = find_robot_abs()
+
+    if not 3300 > xfc > 0 or not 3300 > yfc > 0 and not centering:
+        robot.go_to(0, 0, 0)
+        print("centering")
+        centering = 1
+    if cent_cycles > centering > 0:
+        center_robot()
+    elif centering == cent_cycles:
+        if not robot.going_to_target_pos:
+            del robot
+            time.sleep(3)
+            robot = KUKA('192.168.88.23', ros=True, offline=False)
+            time.sleep(2)
+            centering = 0
+
+    if not robot.going_to_target_pos and not centering:
+        centering = False
+        print("inc:", xr, yr, zr)
+        print("camera:", x, y, z)
+        print("error", x - xr, y - yr, z - zr)
+        x, y, z = rand_pos()
+        print(x, y, z)
+        robot.go_to(x, y, z)
+
+    cv2.putText(frame, f"x: {round(xfc - 1650)}", (0, 25), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.putText(frame, f"y: {round(yfc - 1650)}", (0, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.putText(frame, f"x2: {round(xr * 1000)}", (300, 25), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 1,
+                cv2.LINE_AA)
+    cv2.putText(frame, f"y2: {round(yr * 1000)}", (300, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 1,
+                cv2.LINE_AA)
+    cv2.putText(frame, f"ang2: {zr}", (300, 75), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.putText(frame, f"ang: {round(ang, 5)}", (0, 75), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                (255, 255, 255), 1, cv2.LINE_AA)
     cv2.circle(frame, (cent_X, cent_Y), 2, (255, 255, 255), -1)
     cv2.circle(frame, (back_X, back_Y), 2, (255, 255, 0), -1)
     cv2.imshow('image', frame)
