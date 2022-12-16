@@ -51,11 +51,12 @@ class KUKA:
         :param read_depth: if false doesn't start depth client
         :param camera_enable: enables mjpeg client if True
         """
+        self.ssh_client = paramiko.SSHClient()
         self.operating = True
         self.camera_enable = camera_enable
         self.read_depth = read_depth
         self.ip = ip
-        self.frequency = 90  # operating frequency
+        self.frequency = 50  # operating frequency
 
         # data from this variable one by one to avoid data loss (order: base, arm, grip)
         self.send_queue = [None, None, None]
@@ -99,48 +100,37 @@ class KUKA:
         # connection
         debug(f"connecting to {ip}")
         self.connected = True
-        if ros:
-            debug("starting ROS")
-            self.connect_ssh()
-            time.sleep(5)
+
         self.connected = True
         self.operating = True
-        while self.connected:
-            try:
-                debug("connecting to control channel")
-                # init socket
-                self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.conn.settimeout(2)
-                self.conn.connect((self.ip, 7777))
-                # init reading thread
-                self.data_lock = thr.Lock()
-                self.send_lock = thr.Lock()
-                self.data_thr = thr.Thread(target=self._receive_data, args=())
-                self.send_thr = thr.Thread(target=self.send_data, args=())
-                time.sleep(1)
-                self.data_thr.start()
-                self.send_thr.start()
-                debug("connected *maybe* to 7777 (data stream)")
-                self.check_active_nodes_via_ssh()
+        self.check_active_nodes_via_ssh(force_restart=ros)
 
-                break
-
-            except:
-                debug("failed to connect to 7777 (data stream)")
-                debug("starting/restarting ROS")
-                self.connect_ssh()
-                time.sleep(5)
+        if self.connected:
+            debug("connecting to control channel")
+            # init socket
+            self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.conn.settimeout(2)
+            self.conn.connect((self.ip, 7777))
+            # init reading thread
+            self.data_lock = thr.Lock()
+            self.send_lock = thr.Lock()
+            self.data_thr = thr.Thread(target=self._receive_data, args=())
+            self.send_thr = thr.Thread(target=self.send_data, args=())
+            time.sleep(1)
+            self.data_thr.start()
+            self.send_thr.start()
+            debug("connected to 7777 (data stream)")
 
         # connecting to video server
         if self.connected:
             if self.camera_enable:
-                if self.read_depth :
+                if self.read_depth:
                     self.init_depth_client()
                 self.init_rgb_client()
 
         # waiting for initial arm position
         if self.connected:
-            #debug("waiting for initial arm position")
+            # debug("waiting for initial arm position")
             self.corr_arm_pos = [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]]
             self.arm_pos[0][:-1] = self.corr_arm_pos[0]
             self.arm_pos[1][:-1] = self.corr_arm_pos[1]
@@ -176,7 +166,7 @@ class KUKA:
         self.cam_depth_thr = thr.Thread(target=self.get_frame_depth, args=())
         self.cam_depth_thr.start()
 
-    def check_active_nodes_via_ssh(self, /, user='youbot', password='111111'):
+    def check_active_nodes_via_ssh(self, /, user='youbot', password='111111', force_restart=False):
         """
         Connects to KUKA youbot via SSH client and checks rostopics
 
@@ -194,22 +184,42 @@ class KUKA:
             password = "112233"
         elif self.ip[-1] == "5":
             password = "111111"
+        debug("ROS status check...")
         try:
             client.connect(hostname=self.ip, username=user, password=password, port=port)
         except Exception as err:
             debug(err)
             self.connected = False
             self.operating = False
+            self.camera_enable = False
+            self.read_depth = False
             return
+
         ssh = client.invoke_shell()
-        time.sleep(0.5)
+        time.sleep(0.1)
         ssh.send(b"sudo -s\n")
-        time.sleep(0.5)
+        time.sleep(0.1)
         ssh.send(password.encode("utf-8") + b"\n")
-        time.sleep(0.5)
+        time.sleep(0.1)
+        msg = ssh.recv(10000).decode("utf-8")
+        while not msg.count("root@youbot:"):
+            msg += ssh.recv(1).decode("utf-8")
         ssh.send(b"rostopic list\n")
         time.sleep(2)
         rostopic = ssh.recv(10000).decode("utf-8")
+        #print(rostopic)
+        while True:
+            if force_restart:
+                debug("ROS force restart")
+                force_restart = False
+            elif rostopic.count("ERROR: Unable"):
+                debug("ROS not running")
+            else:
+                break
+            self.connect_ssh()
+            ssh.send(b"rostopic list\n")
+            time.sleep(2)
+            rostopic = ssh.recv(10000).decode("utf-8")
         if rostopic.count("camera/rgb/image_raw"):
             self.camera_enable = True
             debug("RGB camera is active")
@@ -231,8 +241,8 @@ class KUKA:
         :param password: 111111 by default
         """
         port = 22
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+        self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         if self.ip[-1] == "1":
             password = "111111"
         elif self.ip[-1] == "3":
@@ -242,13 +252,13 @@ class KUKA:
         elif self.ip[-1] == "5":
             password = "111111"
         try:
-            client.connect(hostname=self.ip, username=user, password=password, port=port)
+            self.ssh_client.connect(hostname=self.ip, username=user, password=password, port=port)
         except Exception as err:
             debug(err)
             self.connected = False
             self.operating = False
             return
-        ssh = client.invoke_shell()
+        ssh = self.ssh_client.invoke_shell()
         time.sleep(0.5)
         debug("log as root")
         ssh.send(b"sudo -s\n")
@@ -269,15 +279,15 @@ class KUKA:
             ssh_msg += ssh.recv(1).decode("utf-8")
             if ssh_msg.count("System has"):
                 debug("ros started")
+                ssh_msg += ssh.recv(20).decode("utf-8")
+                if ssh_msg.count("System has 0"):
+                    debug("WARN: no arms connected")
                 time.sleep(1)
-                client.close()
+                self.ssh_client.close()
                 break
-            if ssh_msg.count("System has 0"):
-                debug("WARN: no arms connected")
 
-        client.close()
+        self.ssh_client.close()
         time.sleep(0.5)
-
 
     # receiving and parsing sensor data
 
@@ -402,7 +412,7 @@ class KUKA:
             if el != b'':
                 self.data_buff += el
                 data_buff_len += 1
-            if self.data_buff[-1] == 13:
+            if len(self.data_buff) > 0 and self.data_buff[-1] == 13:
                 self.conn.recv(1)
 
                 try:
@@ -561,7 +571,9 @@ class KUKA:
             loc_ang = targ_ang - rob_ang
             fov_speed = speed * math.cos(loc_ang)
             side_speed = -speed * math.sin(loc_ang)
-            self.move_base(fov_speed, side_speed, 0)
+            total_speed = math.sqrt(fov_speed ** 2 + side_speed ** 2)
+            ang_speed = -(ang - rob_ang) / (dist / total_speed)
+            self.move_base(fov_speed, side_speed, ang_speed)
             time.sleep(1 / self.frequency)
         self.move_base(0, 0, 0)
         time.sleep(0.01)
@@ -771,6 +783,7 @@ class KUKA:
         """
         self.operating = False
         if self.connected:
+            self.connected = False
             self.move_base()
             self.move_arm(0, 56, -80, -90, 0, 2)
             time.sleep(1)
