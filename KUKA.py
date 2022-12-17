@@ -408,7 +408,11 @@ class KUKA:
             if data_buff_len > 5000:
                 self.data_buff = b''
                 data_buff_len = 0
-            el = self.conn.recv(1)
+            try:
+                el = self.conn.recv(1)
+            except TimeoutError:
+                print("_receive_data thread died due to timeout")
+
             if el != b'':
                 self.data_buff += el
                 data_buff_len += 1
@@ -530,13 +534,15 @@ class KUKA:
         self.move_speed = (f, s, r)
 
     # go to set coordinates
-    def go_to(self, x, y, ang=0, /, prec=0.005, k=1):
+    def go_to(self, x, y, ang=0, /, prec=0.005, k=1, initial_speed = None):
         """
         Sends robot to given coordinates
         :param x: x position in relative coordinates
         :param y: y position in relative coordinates
         :param ang: angle from x axes
         """
+        if not initial_speed:
+            initial_speed = self.move_to_target_max_speed
         if self.operating:
             if self.going_to_target_pos:
                 self.body_target_pos_lock.acquire()
@@ -546,10 +552,10 @@ class KUKA:
                 self.body_target_pos_lock = thr.Lock()
                 self.going_to_target_pos = True
                 self.body_target_pos = [x, y, ang]
-                self.go_to_tr = thr.Thread(target=self.move_base_to_pos, args=([prec, k]))
+                self.go_to_tr = thr.Thread(target=self.move_base_to_pos, args=([prec, k, initial_speed]))
                 self.go_to_tr.start()
 
-    def move_base_to_pos(self, prec=0.005, k=None):
+    def move_base_to_pos(self, prec=0.005, k=None, initial_speed=0):
         """
         Moving to point thread
         """
@@ -564,11 +570,11 @@ class KUKA:
             loc_y = y - inc[1]
             rob_ang = inc[2]
             dist = math.sqrt(loc_x ** 2 + loc_y ** 2)
-            speed = min(self.move_to_target_max_speed, dist * k)
-            if dist < prec:
-                break
+            speed = min(initial_speed, dist * k)
             targ_ang = math.atan2(loc_y, loc_x)
             loc_ang = targ_ang - rob_ang
+            if dist < prec and (ang - rob_ang) < prec/100:
+                break
             fov_speed = speed * math.cos(loc_ang)
             side_speed = -speed * math.sin(loc_ang)
             total_speed = math.sqrt(fov_speed ** 2 + side_speed ** 2)
