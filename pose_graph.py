@@ -1,9 +1,10 @@
 import numpy as np
 import math
 import scipy
+from pont_cloud import PointCloud
 
 
-# pos, object, lidar, children[child id, edge id]]
+# pos, object, children[child id, edge id]]
 
 class PoseGrah:
     def __init__(self):
@@ -14,7 +15,6 @@ class PoseGrah:
         self.children_id = []
         self.edges_id = []
         self.objects = []
-        self.lidars = []
         self.available_attributes = ["pos", "object", "lidar", "children", "children_id", "edge", "mat_pos",
                                      "lidar_mat_pos"]
         # self.node_weghts = np.array()
@@ -27,7 +27,7 @@ class PoseGrah:
                 ind = int(key[0] + self.node_num)
             else:
                 ind = int(key[0])
-            return self.pos[ind], self.objects[ind], self.lidars[ind], self.children_id[ind]
+            return self.pos[ind], self.objects[ind], self.objects[ind].lidar, self.children_id[ind]
         else:
             ind = int(key[0])
             if ind < 0:
@@ -40,7 +40,7 @@ class PoseGrah:
             if item[1] == "object":
                 return self.objects[ind]
             if item[1] == "lidar":
-                return self.lidars[ind]
+                return self.objects[ind].lidar
             if item[1] == "mat_pos":
                 return self.homogen_matrix_from_pos(self.pos[ind])
             if item[1] == "lidar_mat_pos":
@@ -67,7 +67,7 @@ class PoseGrah:
                 ind = int(key[0] + self.node_num)
             else:
                 ind = int(key[0])
-            self.pos[ind], self.objects[ind], self.lidars[ind], self.children_id[ind] = value
+            self.pos[ind], self.objects[ind], self.objects[ind].lidar, self.children_id[ind] = value
         else:
             ind = int(key[0])
             if ind < 0:
@@ -80,7 +80,7 @@ class PoseGrah:
             if key[1] == "object":
                 self.objects[ind] = value
             if key[1] == "lidar":
-                self.lidars[ind] = value
+                self.objects[ind].lidar = value
             if key[1] == "edge":  # [parent, "edge", child] = value
                 child = key[2]
                 if child < 0:
@@ -96,6 +96,13 @@ class PoseGrah:
 
     def __len__(self):
         return self.node_num
+
+    def get_converted_object(self, id, odom=np.array(False)):
+        if id < 0:
+            id += self.node_num
+        if not odom.any():
+            odom = self.pos[id]
+        return self.objects[id].split_objects(odom)
 
     def check_attribute(self, key):
         if isinstance(key, int):
@@ -127,9 +134,8 @@ class PoseGrah:
             raise AttributeError(f"no edge {i}, {j}")
         return self.edges_cov[self.edges_id[parent_child[0]][self.children_id[parent_child[0]].index(parent_child[1])]]
 
-    def add_node(self, parent_id, pos, object, lidar, /, cov=np.array(False)):  # pos, object, lidar, children[child id, edge id]]
+    def add_node(self, parent_id, pos, object, /, cov=np.array(False)):  # pos, object, children[child id, edge id]]
         self.objects.append(object)
-        self.lidars.append(lidar)
         self.children_id.append([])
         self.edges_id.append([])
 
@@ -149,7 +155,7 @@ class PoseGrah:
             self.pos = np.append(self.pos, [pos], axis=0).astype(np.double)
         self.node_num += 1
 
-    def add_edge(self, parent_id, to_n, child_id, cov=np.array([[0.3, 0, 0], [0, 0.3, 0], [0, 0, 0.8]])):
+    def add_edge(self, parent_id, to_n, child_id, cov=np.array([[0.2, 0, 0], [0, 0.2, 0], [0, 0, 0.4]])):
         parent_id = int(parent_id)
         child_id = int(child_id)
         if child_id < 0:
