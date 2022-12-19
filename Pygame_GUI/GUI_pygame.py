@@ -468,6 +468,7 @@ class GuiControl:
             color = ((0, 230, 0) if available else (230, 0, 0))
             self.target[0] = [(pos[0] - self.start_point_x) * self.cylindrical_scale,
                               (-pos[1] + self.arm_height - self.start_point_y) * self.cylindrical_scale]
+            print(self.target)
             self.robot.move_arm(target=self.target)
         else:
             color = ((100, 255, 100) if available else (240, 100, 100))

@@ -1,9 +1,5 @@
-from Objects import *
-from Screen import Screen
-from Slam_test import *
-import numpy as np
-from pose_graph import PoseGrah
-from pont_cloud import PointCloud
+from import_libs import *
+from Pygame_GUI.Objects import *
 deb = True
 
 
@@ -12,7 +8,7 @@ def debug(inf):
         print(inf)
 
 
-class Lidar_sim:
+class LidarSim:
     def __init__(self, width, inp_file_name):
 
         # window properties
@@ -24,7 +20,7 @@ class Lidar_sim:
 
         self.move_body_scale = 60
         self.wall_lines = []
-        self.pause = True
+        self.pause = False
         self.old_keys = []
         self.step = True
         self.show_plot = False
@@ -48,9 +44,13 @@ class Lidar_sim:
 
         # for slam:
         self.last_odom = [0, 0, 0]
+        self.last_path = 0
         self.pose_graph = PoseGrah()  # odom, object, lidar, children[child id, edge id]]
-        self.max_Gauss_Newton_iter = 30
+        self.max_Gauss_Newton_iter = 50
         self.all_detected_corners = [None, np.array(False)]
+        self.path_length = 0
+        self.refactor = False
+        self.stored_data = (np.array(False), np.array(False))
 
     def init_pygame(self):
         """
@@ -93,23 +93,31 @@ class Lidar_sim:
         while self.screen.running:
             self.update_keys()
             if self.step:
-                self.odom, self.lidar = self.log_data[self.log_data_ind]
+                if not self.refactor:
+                    self.odom, self.lidar = self.log_data[self.log_data_ind]
+                else:
+                    self.odom, self.lidar = self.stored_data[self.log_data_ind]
                 self.m1_slider.set_val(self.log_data_ind)
                 self.step = False
                 self.process_SLAM()
                 self.update_screen()
-
                 if not self.pause:
-                    if self.log_data_ind + 1 < len(self.log_data):
+                    if self.log_data_ind + 1 < len(self.log_data) and not self.refactor:
+                        self.log_data_ind += 1
+                        self.step = True
+                    elif self.log_data_ind + 1 < len(self.stored_data) and self.refactor:
                         self.log_data_ind += 1
                         self.step = True
                     else:
-                        self.Gauss_Newton()
-                        self.draw_pg_map_from_graph()
+                        while True:
+                            self.Gauss_Newton()
+                            self.draw_pg_map_from_graph()
+                            self.SLAM_add_edges()
+                            self.refactor = True
+                            self.step = True
             self.screen.step()
+        print("end")
             # self.clock.tick(10)
-
-
 
     def draw_line_from_point_cloud(self, object, color=(255, 255, 255)):
         connection_coords = [[int(self.width // 2 + p[1] * self.move_body_scale),
@@ -118,70 +126,96 @@ class Lidar_sim:
             cv2.line(self.body_pos_screen, connection_coords[dot - 1], connection_coords[dot], color,
                      max(1, int(0.05 * self.move_body_scale)))
 
-
-
     def process_SLAM(self):
-        point_cloud = PointCloud(self.log_data[self.log_data_ind])
+        point_cloud = PointCloud([self.odom, self.lidar])
         x, y, r = self.odom
         xo, yo, ro = self.last_odom
-        node_created = False
-        if math.sqrt((x - xo) ** 2 + (y - yo) ** 2) > 0.2 or abs(r - ro) > 0.14 or len(self.pose_graph) == 0:
-            if len(self.pose_graph) < 2:
-                self.pose_graph.add_node(-1, self.odom, point_cloud)
-                self.last_odom = self.odom
+        dist = math.sqrt((x - xo) ** 2 + (y - yo) ** 2 + (r-ro)**2)
+        self.last_odom = self.odom
+        self.path_length += dist
+        if len(self.pose_graph) < 2:
+            self.pose_graph.add_node(-1, self.odom, point_cloud, self.path_length)
+            self.last_path = self.path_length
+        elif point_cloud.peak_coords[0]:
+            self.last_path = self.path_length
+            nn = self.check_existing_corners(point_cloud)
+            if not nn:
+                self.pose_graph.add_node(-1, self.odom, point_cloud, self.path_length)
+                self.check_existing_corners(self.pose_graph[-1, "object"], node_ind=len(self.pose_graph) - 1, add=True)
                 return
+            else:
+                nn = int(nn)
+            icp_out = point_cloud == self.pose_graph[nn, "object"]
+            err = pos_vector_from_homogen_matrix(icp_out[0])
+            corrected_odom = undo_lidar(
+                np.dot(icp_out[0], homogen_matrix_from_pos(self.odom, True)))
+            # draw icp
+            #if self.refactor:
+            #    self.plot_icp(corrected_odom, nn, point_cloud)
+            if icp_out and icp_out[-1] < 0.03 and err[0] ** 2 + err[1] ** 2 < 1 and abs(err[2]) < 0.7:
+                if self.path_length - self.pose_graph[-1, "path"] > 0.5:
+                    self.pose_graph.add_node(-1, self.odom, point_cloud, self.path_length)
+                    #self.check_existing_corners(self.pose_graph[-1, "object"], node_ind=len(self.pose_graph) - 1, add=True)
+                    self.pose_graph.add_edge(nn, corrected_odom, -1,
+                                             np.array([[0.01, 0, 0], [0, 0.01, 0], [0, 0, 0.01]]))
+
+                    #self.plot_icp(corrected_odom, nn, self.pose_graph[-1, "object"])
+                return
+        if self.path_length - self.pose_graph[-1, "path"] > 0.8 or self.refactor:
+            # print("new key")
+            self.pose_graph.add_node(-1, self.odom, point_cloud, self.path_length)
             if point_cloud.peak_coords[0]:
+                self.check_existing_corners(self.pose_graph[-1, "object"], node_ind=len(self.pose_graph) - 1, add=True)
 
-                self.last_odom = self.odom
-                nn = int(self.check_existing_corners(point_cloud))
+            # elif self.pose_graph[-1, "path"] - self.path_length > 1 or abs(r - ro) > 0.8:
+            #    self.pose_graph.add_node(-1, self.odom, point_cloud, self.path_length)
+        print(len(self.pose_graph), self.pose_graph.edge_num)
+
+    def SLAM_add_edges(self):
+        self.stored_data = []
+        stored_data = (self.pose_graph.pos, [i.lidar for i in self.pose_graph.objects])
+
+        for i in range(len(stored_data[0])):
+            self.stored_data.append([[*stored_data[0][i]], stored_data[1][i]])
+        self.all_detected_corners = [None, np.array(False)]
+        self.odom, self.lidar = self.stored_data[0]
+
+        self.pose_graph[0, "object"] = PointCloud([self.odom, self.lidar])
+
+        for i in range(len(self.pose_graph)):
+            self.odom, self.lidar = self.stored_data[i]
+            self.pose_graph[i, "object"] = PointCloud(self.stored_data[i])
+            point_cloud = self.pose_graph[i, "object"]
+            if point_cloud.peak_coords[0]:
+                nn = self.check_existing_corners(point_cloud)
+                if not nn:
+                    self.check_existing_corners(self.pose_graph[i, "object"], node_ind=i, add=True)
+                    continue
+                else:
+                    nn = int(nn)
+                self.pose_graph[nn, "object"] = PointCloud(self.stored_data[nn])
                 icp_out = point_cloud == self.pose_graph[nn, "object"]
-                self.update_screen()
-                # draw icp
-                if icp_out and icp_out[-1] < 0.03:
-                    self.pose_graph.add_node(-1, self.odom, point_cloud)
-                    self.check_existing_corners(self.pose_graph[-1, "object"], node_ind = len(self.pose_graph) - 1)
-                    err = self.pose_graph.pos_vector_from_homogen_matrix(icp_out[0])
-                    if err[0] ** 2 + err[1] ** 2 > 0.4 or abs(err[2]) > 0.8:
-                        return
-                    print(err, icp_out[-1])
-                    corrected_odom = self.pose_graph.undo_lidar(
-                        np.dot(icp_out[0], self.pose_graph[-1, "lidar_mat_pos"]).astype(np.double))
+                err = pos_vector_from_homogen_matrix(icp_out[0])
+                corrected_odom = undo_lidar(np.dot(icp_out[0], homogen_matrix_from_pos(self.odom, True)))
 
-                    if nn == len(self.pose_graph) - 2:
-                        self.pose_graph[nn, "edge", -1] = (corrected_odom, np.array(
-                            [[0.001, 0, 0], [0, 0.001, 0],
-                             [0, 0, 0.0001]]))  # [parent, "edge", child] = value
-                    else:
-                        self.pose_graph.add_edge(nn, corrected_odom, -1,
-                                                 np.array([[0.001, 0, 0], [0, 0.001, 0], [0, 0, 0.0001]]))
+                if icp_out and icp_out[-1] < 0.03 and err[0] ** 2 + err[1] ** 2 < 1 and abs(err[2]) < 0.7:
+                    print(i, nn)
+                    if nn < i and not i in self.pose_graph[nn, "children_id"]:
+                        print("new edge")
+                        self.pose_graph.add_edge(nn, corrected_odom, i,
+                                                 np.array([[0.01, 0, 0], [0, 0.01, 0], [0, 0, 0.01]]))
+                        self.plot_icp(corrected_odom, nn, self.pose_graph[i, "object"])
+                else:
+                    self.check_existing_corners(self.pose_graph[i, "object"], node_ind=i, add=True)
+                    #self.plot_icp(corrected_odom, nn, self.pose_graph[i, "object"])
+        print(self.pose_graph.edge_num)
 
-
-                    if False:
-                        pyplot.plot([p[0] for p in self.pose_graph[-1, "object"].xy_form],
-                                    [p[1] for p in self.pose_graph[-1, "object"].xy_form], 'o',
-                                    label='points 2')
-                        print(self.pose_graph.pos_vector_from_homogen_matrix(corrected_odom))
-                        corr = self.pose_graph[-1, "object"].split_objects(self.pose_graph.pos_vector_from_homogen_matrix(corrected_odom))
-                        pyplot.plot([p[0] for p in corr],
-                                    [p[1] for p in corr], '.', label='converted')
-                        pyplot.plot([p[0] for p in self.pose_graph[nn, "object"].xy_form],
-                                    [p[1] for p in self.pose_graph[nn, "object"].xy_form], '.', label='src')
-                        pyplot.axis('equal')
-                        pyplot.legend(numpoints=1)
-                        pyplot.show()
-
-
-            elif math.sqrt((x - xo) ** 2 + (y - yo) ** 2) > 0.9 or abs(r - ro) > 0.8 and not node_created:
-                self.pose_graph.add_node(-1, self.odom, point_cloud)
-                self.last_odom = self.odom
-            print(len(self.pose_graph), self.pose_graph.edge_num)
-
-    def check_existing_corners(self, object, /,node_ind=None):
+    def check_existing_corners(self, object, /, node_ind=None, add=False):
         if self.all_detected_corners[1].any():
             nodes_tree = scipy.spatial.cKDTree(self.all_detected_corners[1])
             res = np.array(nodes_tree.query(object.peak_coords[1])).T
             res = sorted(res, key=lambda x: x[0])
-            if res[0][0] > 0.3 and node_ind:
+            if add:
                 peak_coords = object.peak_coords[1]
                 ind = [node_ind] * len(peak_coords)
                 for i in ind:
@@ -190,16 +224,31 @@ class Lidar_sim:
             return self.all_detected_corners[0][int(res[0][1])]
         elif node_ind:
             peak_coords = object.peak_coords[1]
-            ind = [node_ind]* len(peak_coords)
+            ind = [node_ind] * len(peak_coords)
             self.all_detected_corners = [ind, peak_coords]
-        return np.array(False)
+        return None
+
+    def plot_icp(self, corrected_odom, nn, point_cloud):
+        pyplot.plot([p[0] for p in point_cloud.xy_form],
+                    [p[1] for p in point_cloud.xy_form], 'o',
+                    label='points 2')
+        corr = point_cloud.split_objects(
+            pos_vector_from_homogen_matrix(corrected_odom))
+        pyplot.plot([p[0] for p in self.pose_graph[nn, "object"].xy_form],
+                    [p[1] for p in self.pose_graph[nn, "object"].xy_form], '.', label='src')
+        pyplot.plot([p[0] for p in corr],
+                    [p[1] for p in corr], '.', label='converted')
+
+        pyplot.axis('equal')
+        pyplot.legend(numpoints=1)
+        pyplot.show()
 
     def error_func(self, i, Xi, j, Xj):
         Zij = self.pose_graph.edge(i, j)
-        Xi = self.pose_graph.homogen_matrix_from_pos(Xi)
-        Xj = self.pose_graph.homogen_matrix_from_pos(Xj)
+        Xi = homogen_matrix_from_pos(Xi)
+        Xj = homogen_matrix_from_pos(Xj)
         err_mat = np.linalg.inv(Zij) @ (np.linalg.inv(Xi) @ Xj)
-        err = self.pose_graph.pos_vector_from_homogen_matrix(err_mat)
+        err = pos_vector_from_homogen_matrix(err_mat)
         return err
 
     def Jacobian(self, i, j):
@@ -266,8 +315,9 @@ class Lidar_sim:
             # print()
             # print(b)
             dx = np.append(np.array([[0], [0], [0]]), dx)
-            self.pose_graph.pos = np.copy((self.pose_graph.pos.reshape(1, len(self.pose_graph) * 3) + dx.T).reshape(
-                len(self.pose_graph), 3))
+            self.pose_graph.pos = np.copy(
+                (self.pose_graph.pos.reshape(1, len(self.pose_graph) * 3) + dx.T * 0.1).reshape(
+                    len(self.pose_graph), 3))
         self.draw_map_from_graph()
         pyplot.axis('equal')
         pyplot.legend(numpoints=1)
@@ -283,8 +333,7 @@ class Lidar_sim:
 
     def draw_pg_map_from_graph(self):
         for i in range(1, len(self.pose_graph)):
-            self.draw_lidar(self.pose_graph[i, "pos"], self.pose_graph[i, "lidar"], (255,255,255))
-
+            self.draw_lidar(self.pose_graph[i, "pos"], self.pose_graph[i, "lidar"], (255, 255, 255))
 
     def update_screen(self):
         self.body_pos_screen = np.copy(self.body_pos_background)
@@ -331,7 +380,7 @@ class Lidar_sim:
             for l in range(0, len(lidar)):
                 if not 0.9 < lidar[l] < 5.5:
                     continue
-                #color = (0, max(255, 255 - int(45.5 * l)), min(255, int(45.5 * l)))
+                # color = (0, max(255, 255 - int(45.5 * l)), min(255, int(45.5 * l)))
                 cv2.ellipse(self.body_pos_screen, (cent_y, cent_x),
                             (int(lidar[l] * self.move_body_scale), int(lidar[l] * self.move_body_scale)),
                             math.degrees(ang), 30 + int(-240 / len(lidar) * l), 30 + int(-240 / len(lidar) * (l + 1)),
@@ -385,5 +434,5 @@ class Lidar_sim:
                  max(1, int(0.02 * self.move_body_scale)))
 
 
-sim = Lidar_sim(700, "../lidar_odom_log/lidar_odom_log_8.txt")
+sim = LidarSim(700, "../lidar_odom_log/lidar_odom_log_8.txt")
 sim.run()

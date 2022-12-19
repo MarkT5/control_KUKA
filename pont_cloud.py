@@ -1,7 +1,6 @@
-import math
 import numpy as np
-import scipy
-from matplotlib import pyplot
+
+from import_libs import *
 
 
 class PointCloud:
@@ -14,34 +13,82 @@ class PointCloud:
         self.peaks = []
         self.peak_coords = [None, np.array([False])]
         for i in range(len(self.gaps) - 1, 0, -1):
-            self.peaks.append([*self.douglas_peucker(self.gaps[i - 1], self.gaps[i])])
-            for i in range(1, len(self.peaks[-1][0]) - 1):
+            dp_out = [*self.douglas_peucker(self.gaps[i - 1], self.gaps[i])]
+            for i in range(1, len(dp_out[0]) - 1):
+                self.peaks.append([[dp_out[0][i-1], dp_out[0][i], dp_out[0][i+1]], dp_out[1]])
                 if self.peak_coords[1].any():
                     self.peak_coords[0].append(len(self.peaks) - 1)
                     self.peak_coords[1] = np.append(self.peak_coords[1], [self.xy_form[self.peaks[-1][0][i]]], axis=0)
                 else:
                     self.peak_coords = [[len(self.peaks) - 1], np.array([self.xy_form[self.peaks[-1][0][i]]])]
 
-        # print(self.odom, self.lidar)
-        # print("gaps:", self.gaps)
-        # print("sizes:", self.object_sizes)
-        # print("peaks:", self.peaks)
-        # print("peak coords:", self.peak_coords)
-
     def __eq__(self, other):  ##icp
         if self.peak_coords[1].any() and other.peak_coords[1].any():
-            neighbours = np.array([*self.nearest_neighbor([self.peak_coords[1]], other.peak_coords[1]), range(len(self.peak_coords[1]))]).T
+            neighbours = np.array([*self.nearest_neighbor([self.peak_coords[1]], other.peak_coords[1]),
+                                   range(len(self.peak_coords[1]))]).T
             neighbours = sorted(neighbours, key=lambda x: x[0])
-            if neighbours[0][0] < 0.5:
-                peak = self.peaks[self.peak_coords[0][int(neighbours[0][2])]]
-                weight_vector = self.generate_weight_vector(peak)
-                icp_out = self.icp(self.get_obj(self.peak_coords[0][int(neighbours[0][2])]),
-                                   other.get_obj(other.peak_coords[0][int(neighbours[0][1])]),
-                                   weight_vector=[weight_vector])
-                return icp_out
-        else:
-            return None
 
+            if neighbours[0][0] < 0.5:
+
+                targ_obj_self = self.get_obj(self.peak_coords[0][int(neighbours[0][2])])
+                targ_obj_other = other.get_obj(other.peak_coords[0][int(neighbours[0][1])])
+
+                corner_self = self.peaks[self.peak_coords[0][int(neighbours[0][2])]][0]
+                corner_other = other.peaks[other.peak_coords[0][int(neighbours[0][1])]][0]
+                #print(corner_self)
+                ps1, ps2, ps3 = self.xy_form[corner_self]
+                po1, po2, po3 = other.xy_form[corner_other]
+
+                dist = min(min(np.linalg.norm(po1-po2), np.linalg.norm(po3-po2)),
+                           min(np.linalg.norm(ps1-ps2), np.linalg.norm(ps3-ps2)))
+                obj_self = []
+                obj_other = []
+                for i in range(corner_self[0], corner_self[1]):
+                    if np.linalg.norm(self.xy_form[i] - self.xy_form[corner_self[1]]) < dist:
+                        obj_self.append(self.xy_form[i])
+                for i in range(corner_self[1], corner_self[2]):
+                    if np.linalg.norm(self.xy_form[i] - self.xy_form[corner_self[1]]) < dist:
+                        obj_self.append(self.xy_form[i])
+                obj_self = np.array(obj_self)
+                for i in range(corner_other[0], corner_other[1]):
+                    if np.linalg.norm(other.xy_form[i] - other.xy_form[corner_other[1]]) < dist:
+                        obj_other.append(other.xy_form[i])
+                for i in range(corner_other[1], corner_other[2]):
+                    if np.linalg.norm(other.xy_form[i]-other.xy_form[corner_other[1]]) < dist:
+                        obj_other.append(other.xy_form[i])
+                obj_other = np.array(obj_other)
+
+                #peak = self.peaks[targ_obj_self]
+                #weight_vector = self.generate_weight_vector(peak)
+                icp_out = self.icp(obj_self, obj_other)
+
+                                   #weight_vector=[weight_vector])
+                if False:
+                    corrected_odom = undo_lidar(np.dot(icp_out[0], homogen_matrix_from_pos(self.odom, True)))
+                    corr = self.split_objects(pos_vector_from_homogen_matrix(corrected_odom))
+
+                    pyplot.plot([p[0] for p in corr],
+                                [p[1] for p in corr], '.',
+                                label='converted')
+
+                    pyplot.plot([p[0] for p in obj_self],
+                                [p[1] for p in obj_self], 'o',
+                                label='compare self')
+                    pyplot.plot([p[0] for p in obj_other],
+                                [p[1] for p in obj_other], 'o',
+                                label='compare other')
+
+
+                    err = pos_vector_from_homogen_matrix(icp_out[0])
+                    print(icp_out[-1])
+                    print(icp_out[-1] < 0.03, err[0] ** 2 + err[1] ** 2 < 0.4, abs(err[2]) < 0.8)
+
+                    pyplot.axis('equal')
+                    pyplot.legend(numpoints=1)
+                    pyplot.show()
+                return icp_out
+
+        return np.array([[1, 0, 1e15], [0, 1, 1e15], [0, 0, 1]]), None, 0, 1e15
 
     def get_obj(self, ind):
         ind = int(ind)
@@ -49,7 +96,7 @@ class PointCloud:
 
         return np.array(self.xy_form[peak[0][0]:peak[0][-1]])
 
-    def conv_cil_to_dec(self, ind=None, /, odom = np.array(False)):
+    def conv_cil_to_dec(self, ind=None, /, odom=np.array(False)):
         out_points = []
         if not odom.any():
             odom = np.array(self.odom)

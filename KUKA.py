@@ -265,7 +265,7 @@ class KUKA:
         time.sleep(0.5)
         ssh.send(password.encode("utf-8") + b"\n")
         debug("cleaning screen...")
-        time.sleep(0.5)
+        time.sleep(1)
         ssh.send(b"pkill screen\n")
         time.sleep(0.5)
         ssh.send(b"screen -S roslaunch\n")
@@ -705,11 +705,13 @@ class KUKA:
                 elif -84 < m2_ang_neg < 63 and -135 < m3_ang_neg < 110 and -90 < m4_ang_neg < 95:
                     return m2_ang_neg, m3_ang_neg, m4_ang_neg, True
                 else:
+                    print("no")
                     return *self.arm_pos[self.arm_ID][1:4], False
                 # m2_ang = range_cut(-84, 63, m2_ang)
                 # m3_ang = range_cut(-135, 110, m3_ang)
                 # m4_ang = range_cut(-120, 90, m4_ang)
             except:
+                print("no")
                 # debug("math error, out of range")
                 return *self.arm_pos[self.arm_ID][1:4], False
         else:  # (not tested, probably not working)
