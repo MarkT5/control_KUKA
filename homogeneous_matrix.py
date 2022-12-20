@@ -42,7 +42,8 @@ def undo_lidar(mat):
 
 
 def pos_vector_from_homogen_matrix(mat):
-    aco = math.acos(max(-1, min(1, mat[0, 0])))
-    asi = math.asin(max(-1, min(1, mat[1, 0])))
-    asi_sign = -1 + 2 * (asi > 0)
-    return np.array([*mat[:2, 2], aco * (asi_sign)])
+    rot = math.atan2(mat[1, 0], mat[0, 0])
+    return np.array([*mat[:2, 2], rot])
+
+
+print(pos_vector_from_homogen_matrix(homogen_matrix_from_pos([1,4,-3.1416],False)))

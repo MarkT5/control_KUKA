@@ -175,9 +175,8 @@ class PoseGrah:
             to_n = np.array(to_n)
         if to_n.shape == (3, 3):
             B = to_n
-
         else:
-            B = np.copy(homogen_matrix_from_pos(to_n))
+            B = homogen_matrix_from_pos(to_n)
         if self.edge_num > 0:
             self.edges = np.append(self.edges, [np.dot(A, B)], axis=0)
             self.edges_cov = np.append(self.edges, [cov], axis=0)

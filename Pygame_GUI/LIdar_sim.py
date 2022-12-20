@@ -157,9 +157,9 @@ class LidarSim:
                     self.pose_graph.add_node(-1, self.odom, point_cloud, self.path_length)
                     #self.check_existing_corners(self.pose_graph[-1, "object"], node_ind=len(self.pose_graph) - 1, add=True)
                     self.pose_graph.add_edge(nn, corrected_odom, -1,
-                                             np.array([[0.01, 0, 0], [0, 0.01, 0], [0, 0, 0.01]]))
+                                             np.array([[0.001, 0, 0], [0, 0.001, 0], [0, 0, 0.001]]))
 
-                    #self.plot_icp(corrected_odom, nn, self.pose_graph[-1, "object"])
+                    self.plot_icp(corrected_odom, nn, self.pose_graph[-1, "object"])
                 return
         if self.path_length - self.pose_graph[-1, "path"] > 0.8 or self.refactor:
             # print("new key")
@@ -204,7 +204,7 @@ class LidarSim:
                         print("new edge")
                         self.pose_graph.add_edge(nn, corrected_odom, i,
                                                  np.array([[0.01, 0, 0], [0, 0.01, 0], [0, 0, 0.01]]))
-                        self.plot_icp(corrected_odom, nn, self.pose_graph[i, "object"])
+                        #self.plot_icp(corrected_odom, nn, self.pose_graph[i, "object"])
                 else:
                     self.check_existing_corners(self.pose_graph[i, "object"], node_ind=i, add=True)
                     #self.plot_icp(corrected_odom, nn, self.pose_graph[i, "object"])
@@ -316,7 +316,7 @@ class LidarSim:
             # print(b)
             dx = np.append(np.array([[0], [0], [0]]), dx)
             self.pose_graph.pos = np.copy(
-                (self.pose_graph.pos.reshape(1, len(self.pose_graph) * 3) + dx.T * 0.1).reshape(
+                (self.pose_graph.pos.reshape(1, len(self.pose_graph) * 3) + dx.T * 0.05).reshape(
                     len(self.pose_graph), 3))
         self.draw_map_from_graph()
         pyplot.axis('equal')

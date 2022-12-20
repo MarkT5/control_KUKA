@@ -269,7 +269,7 @@ class PointCloud:
 
     def douglas_peucker(self, point1, point2, only_peaks=False):
         iters = 4
-        min_weight = iters * (point2 - point1) // 15
+        min_weight = 40
         point_list = [point1, point2 - 1]
         weights = [0]
         new_point_list = [point1, point2 - 1]
