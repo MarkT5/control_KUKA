@@ -46,7 +46,7 @@ class LidarSim:
         self.last_odom = [0, 0, 0]
         self.last_path = 0
         self.pose_graph = PoseGrah()  # odom, object, lidar, children[child id, edge id]]
-        self.max_Gauss_Newton_iter = 50
+        self.max_Gauss_Newton_iter = 15
         self.all_detected_corners = [None, np.array(False)]
         self.path_length = 0
         self.refactor = False
@@ -152,7 +152,7 @@ class LidarSim:
                 if self.path_length - self.pose_graph[-1, "path"] > 0.5:
                     self.pose_graph.add_node(-1, self.odom, point_cloud, self.path_length)
                     self.pose_graph.add_edge(nn, corrected_odom, -1,
-                                             np.array([[0.1, 0, 0], [0, 0.1, 0], [0, 0, 0.1]]))
+                                             np.array([[5, 0, 0], [0, 5, 0], [0, 0, 5]]))
 
                     #self.plot_icp(corrected_odom, nn, self.pose_graph[-1, "object"])
                 return
@@ -194,7 +194,7 @@ class LidarSim:
                     if nn < i and not i in self.pose_graph[nn, "children_id"]:
                         print("new edge")
                         self.pose_graph.add_edge(nn, corrected_odom, i,
-                                                 np.array([[0.1, 0, 0], [0, 0.1, 0], [0, 0, 0.1]]))
+                                                 np.array([[5, 0, 0], [0, 5, 0], [0, 0, 5]]))
                         #self.plot_icp(corrected_odom, nn, self.pose_graph[i, "object"])
                 else:
                     self.check_existing_corners(self.pose_graph[i, "object"], node_ind=i, add=True)
@@ -243,7 +243,7 @@ class LidarSim:
         return err
 
     def Jacobian(self, i, j):
-        eps = 1e-7
+        eps = 1e-11
         grad_i = []
         grad_j = []
 
@@ -312,7 +312,7 @@ class LidarSim:
             # print(b)
             dx = np.append(np.array([[0], [0], [0]]), dx)
             self.pose_graph.pos = np.copy(
-                (self.pose_graph.pos.reshape(1, len(self.pose_graph) * 3) + dx.T * 0.05).reshape(
+                (self.pose_graph.pos.reshape(1, len(self.pose_graph) * 3) + dx.T * 0.4).reshape(
                     len(self.pose_graph), 3))
         self.draw_map_from_graph()
         pyplot.axis('equal')
