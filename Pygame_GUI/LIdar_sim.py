@@ -145,30 +145,21 @@ class LidarSim:
                 return
             else:
                 nn = int(nn)
-            icp_out = point_cloud == self.pose_graph[nn, "object"]
+            icp_out = point_cloud.icp(self.pose_graph[nn, "object"])
             err = pos_vector_from_homogen_matrix(icp_out[0])
-            corrected_odom = undo_lidar(
-                np.dot(icp_out[0], homogen_matrix_from_pos(self.odom, True)))
-            # draw icp
-            #if self.refactor:
-            #    self.plot_icp(corrected_odom, nn, point_cloud)
+            corrected_odom = undo_lidar(np.dot(icp_out[0], homogen_matrix_from_pos(self.odom, True)))
             if icp_out and icp_out[-1] < 0.03 and err[0] ** 2 + err[1] ** 2 < 1 and abs(err[2]) < 0.7:
                 if self.path_length - self.pose_graph[-1, "path"] > 0.5:
                     self.pose_graph.add_node(-1, self.odom, point_cloud, self.path_length)
-                    #self.check_existing_corners(self.pose_graph[-1, "object"], node_ind=len(self.pose_graph) - 1, add=True)
                     self.pose_graph.add_edge(nn, corrected_odom, -1,
-                                             np.array([[0.001, 0, 0], [0, 0.001, 0], [0, 0, 0.001]]))
+                                             np.array([[0.1, 0, 0], [0, 0.1, 0], [0, 0, 0.1]]))
 
-                    self.plot_icp(corrected_odom, nn, self.pose_graph[-1, "object"])
+                    #self.plot_icp(corrected_odom, nn, self.pose_graph[-1, "object"])
                 return
         if self.path_length - self.pose_graph[-1, "path"] > 0.8 or self.refactor:
-            # print("new key")
             self.pose_graph.add_node(-1, self.odom, point_cloud, self.path_length)
             if point_cloud.peak_coords[0]:
                 self.check_existing_corners(self.pose_graph[-1, "object"], node_ind=len(self.pose_graph) - 1, add=True)
-
-            # elif self.pose_graph[-1, "path"] - self.path_length > 1 or abs(r - ro) > 0.8:
-            #    self.pose_graph.add_node(-1, self.odom, point_cloud, self.path_length)
         print(len(self.pose_graph), self.pose_graph.edge_num)
 
     def SLAM_add_edges(self):
@@ -194,7 +185,7 @@ class LidarSim:
                 else:
                     nn = int(nn)
                 self.pose_graph[nn, "object"] = PointCloud(self.stored_data[nn])
-                icp_out = point_cloud == self.pose_graph[nn, "object"]
+                icp_out = point_cloud.icp(self.pose_graph[nn, "object"])
                 err = pos_vector_from_homogen_matrix(icp_out[0])
                 corrected_odom = undo_lidar(np.dot(icp_out[0], homogen_matrix_from_pos(self.odom, True)))
 
@@ -203,7 +194,7 @@ class LidarSim:
                     if nn < i and not i in self.pose_graph[nn, "children_id"]:
                         print("new edge")
                         self.pose_graph.add_edge(nn, corrected_odom, i,
-                                                 np.array([[0.01, 0, 0], [0, 0.01, 0], [0, 0, 0.01]]))
+                                                 np.array([[0.1, 0, 0], [0, 0.1, 0], [0, 0, 0.1]]))
                         #self.plot_icp(corrected_odom, nn, self.pose_graph[i, "object"])
                 else:
                     self.check_existing_corners(self.pose_graph[i, "object"], node_ind=i, add=True)
@@ -252,7 +243,7 @@ class LidarSim:
         return err
 
     def Jacobian(self, i, j):
-        eps = 1e-13
+        eps = 1e-7
         grad_i = []
         grad_j = []
 
@@ -283,7 +274,12 @@ class LidarSim:
                     ov_sq_err += err * err
                     Jij = self.Jacobian(i, j)
                     A, B = Jij
-                    OM = np.eye(3) * self.pose_graph.edge_cov(i, j)
+                    #print("A")
+                    #print(A)
+                    #print("B")
+                    #print(B)
+                    OM = self.pose_graph.edge_cov(i, j)
+                    #print(OM)
 
                     b[i * 3:(i + 1) * 3] += err.T @ OM @ A
                     b[j * 3:(j + 1) * 3] += err.T @ OM @ B

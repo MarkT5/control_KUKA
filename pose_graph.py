@@ -7,6 +7,7 @@ class PoseGrah:
     def __init__(self):
         self.edges = np.array(False)
         self.edges_cov = np.array(False)
+        self.pos = np.array(False)
         self.edge_num = 0
         self.node_num = 0
         self.children_id = []
@@ -15,7 +16,6 @@ class PoseGrah:
         self.path = []
         self.available_attributes = ["pos", "object", "lidar", "children", "children_id", "edge", "mat_pos",
                                      "lidar_mat_pos", "path"]
-        # self.node_weghts = np.array()
 
     def __getitem__(self, item):
         key = list(item)
@@ -159,7 +159,7 @@ class PoseGrah:
             self.pos = np.append(self.pos, [pos], axis=0)
         self.node_num += 1
 
-    def add_edge(self, parent_id, to_n, child_id, cov=np.array([[0.6, 0, 0], [0, 0.6, 0], [0, 0, 0.6]])):
+    def add_edge(self, parent_id, to_n, child_id, cov=np.array([[0.2, 0, 0], [0, 0.2, 0], [0, 0, 0.2]])):
         parent_id = int(parent_id)
         child_id = int(child_id)
         if child_id < 0:
@@ -179,7 +179,7 @@ class PoseGrah:
             B = homogen_matrix_from_pos(to_n)
         if self.edge_num > 0:
             self.edges = np.append(self.edges, [np.dot(A, B)], axis=0)
-            self.edges_cov = np.append(self.edges, [cov], axis=0)
+            self.edges_cov = np.append(self.edges_cov, [cov], axis=0)
         else:
             self.edges = np.array([np.dot(A, B)])
             self.edges_cov = np.array([cov])

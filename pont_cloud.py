@@ -22,7 +22,7 @@ class PointCloud:
                 else:
                     self.peak_coords = [[len(self.peaks) - 1], np.array([self.xy_form[self.peaks[-1][0][i]]])]
 
-    def __eq__(self, other):  ##icp
+    def icp(self, other):  ##icp
         if self.peak_coords[1].any() and other.peak_coords[1].any():
             neighbours = np.array([*self.nearest_neighbor([self.peak_coords[1]], other.peak_coords[1]),
                                    range(len(self.peak_coords[1]))]).T
@@ -60,7 +60,7 @@ class PointCloud:
 
                 #peak = self.peaks[targ_obj_self]
                 #weight_vector = self.generate_weight_vector(peak)
-                icp_out = self.icp(obj_self, obj_other)
+                icp_out = self._icp(obj_self, obj_other)
 
                                    #weight_vector=[weight_vector])
                 if False:
@@ -381,7 +381,7 @@ class PointCloud:
         dist, indexes = A_tree.query(src)
         return dist.ravel(), indexes.ravel()
 
-    def icp(self, A, B, init_pose=None, max_iterations=20, tolerance=0.0001, /, weight_vector=None):
+    def _icp(self, A, B, init_pose=None, max_iterations=20, tolerance=0.0001, /, weight_vector=None):
         # print(A.shape, B.shape)
         # assert A.shape == B.shape
         # get number of dimensions
