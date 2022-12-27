@@ -109,12 +109,16 @@ class LidarSim:
                         self.log_data_ind += 1
                         self.step = True
                     else:
-                        while True:
+                        self.draw_map_from_graph("before")
+                        for i in range(5):
                             self.Gauss_Newton()
-                            self.draw_pg_map_from_graph()
                             self.SLAM_add_edges()
                             self.refactor = True
                             self.step = True
+                        self.draw_map_from_graph("after")
+                        pyplot.axis('equal')
+                        pyplot.legend(numpoints=1)
+                        pyplot.show()
             self.screen.step()
         print("end")
             # self.clock.tick(10)
@@ -261,7 +265,7 @@ class LidarSim:
         return np.column_stack(grad_i), np.column_stack(grad_j)
 
     def Gauss_Newton(self):
-        self.draw_map_from_graph()
+
         for itr in range(self.max_Gauss_Newton_iter):
             ov_sq_err = np.array([0, 0, 0]).astype(float)
             print(itr)
@@ -314,17 +318,14 @@ class LidarSim:
             self.pose_graph.pos = np.copy(
                 (self.pose_graph.pos.reshape(1, len(self.pose_graph) * 3) + dx.T * 0.4).reshape(
                     len(self.pose_graph), 3))
-        self.draw_map_from_graph()
-        pyplot.axis('equal')
-        pyplot.legend(numpoints=1)
-        pyplot.show()
 
-    def draw_map_from_graph(self):
+
+    def draw_map_from_graph(self, name="name"):
         map = self.pose_graph.get_converted_object(1)
         for i in range(1, len(self.pose_graph)):
             new = self.pose_graph.get_converted_object(i)
             map = np.append(map, new, axis=0)
-        pyplot.plot([p[0] for p in map], [p[1] for p in map], '.', label=f'new {2}')
+        pyplot.plot([p[0] for p in map], [p[1] for p in map], '.', label=name)
         print(map.shape)
 
     def draw_pg_map_from_graph(self):

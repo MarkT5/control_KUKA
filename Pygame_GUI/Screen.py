@@ -25,6 +25,10 @@ class Screen:
         while self.running:
             self.step()
 
+    def end(self):
+        self.running = False
+        pg.quit()
+
     def handle_events(self):
         for event in pg.event.get():
             if event.type == pg.QUIT:
