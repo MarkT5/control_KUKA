@@ -15,12 +15,12 @@ class PointCloud:
         for i in range(len(self.gaps) - 1, 0, -1):
             dp_out = [*self.douglas_peucker(self.gaps[i - 1], self.gaps[i])]
             for i in range(1, len(dp_out[0]) - 1):
-                self.peaks.append([[dp_out[0][i-1], dp_out[0][i], dp_out[0][i+1]], dp_out[1]])
+                self.peaks.append([[dp_out[0][i-1], dp_out[0][i], dp_out[0][i+1]], [dp_out[1][i-1],dp_out[1][i]]])
                 if self.peak_coords[1].any():
                     self.peak_coords[0].append(len(self.peaks) - 1)
-                    self.peak_coords[1] = np.append(self.peak_coords[1], [self.xy_form[self.peaks[-1][0][i]]], axis=0)
+                    self.peak_coords[1] = np.append(self.peak_coords[1], [self.xy_form[self.peaks[-1][0][1]]], axis=0)
                 else:
-                    self.peak_coords = [[len(self.peaks) - 1], np.array([self.xy_form[self.peaks[-1][0][i]]])]
+                    self.peak_coords = [[len(self.peaks) - 1], np.array([self.xy_form[self.peaks[-1][0][1]]])]
 
     def icp(self, other):  ##icp
         if self.peak_coords[1].any() and other.peak_coords[1].any():
