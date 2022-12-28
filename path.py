@@ -1,23 +1,14 @@
-import threading as thr
-
-import cv2
 import numpy as np
-import pygame as pg
-import scipy
 
-from KUKA import KUKA
-from Pygame_GUI.Screen import Screen
-from RRT import RRT
-from map_plotter import MapPlotter
+from import_libs import *
 
 
 class RRT_sim:
-    def __init__(self, plotter=None, robot=None):
+    def __init__(self, robot=None):
         self.robot = robot
-        self.plotter = plotter
-        self.screen_size = 900
+        self.screen_size = 2000
 
-        self.discrete = 20
+        self.discrete = 100
         self.robot_radius = 17
         self.screen_obj = Screen(self.screen_size, self.screen_size)
         self.screen = self.screen_obj.screen
@@ -29,11 +20,14 @@ class RRT_sim:
         self.new_map = False
         self.end_point = np.array(False)
         self.start_point = np.array(False)
-        self.nav_map = []
-        self.map_arr = []
-        self.manual_map()
+        self.nav_map = np.array(False)
+        self.map_arr = np.array(False)
+        #self.manual_map()
 
         self.rrt_state = 0
+        self.slam = SLAM(self.robot)
+        self.slam_thr = thr.Thread(target=self.slam.run, args=())
+        self.slam_thr.start()
 
     # make map
     def manual_map(self):
@@ -61,25 +55,27 @@ class RRT_sim:
         self.nav_map = np.array(nav_map)
         self.nav_map = self.nav_map.reshape(len(self.map_arr), len(self.map_arr[0]))
 
-    def grab_map(self):
-        try:
-            del self.rrt
-        except:
-            pass
-        self.map_arr = np.copy(self.plotter.map_background)
-        self.nav_map = np.copy(self.plotter.map_arr)
-        self.map_shape = self.nav_map.shape
-        self.map_k = self.screen_size // max(self.map_shape[0], self.map_shape[1])
-        self.start_point = np.array(self.plotter.scale_to_arr(*self.plotter.pos[:-1]))
-        self.apply_robot_radius_to_map()
-
     def m_to_arr(self, coords):
         x, y = coords
         return [x * self.discrete, y * self.discrete]
 
-    def arr_to_m(self, coords):
-        x, y = coords
-        return [x / self.discrete, y / self.discrete]
+    def grab_map(self):
+        #try:
+        #    del self.rrt
+        #except:
+        #    pass
+        self.nav_map = self.slam.bool_map
+        self.map_arr = self.slam.bool_map*255
+        self.map_shape = self.nav_map.shape
+        self.map_k = self.screen_size / max(self.map_shape[0], self.map_shape[1])
+        #self.start_point = np.array(self.slam.corr_pos)
+        #map_arr = [[[255, 255, 255]] * self.map_shape[0]] * self.map_shape[1]
+        #for i in range(self.map_shape[0]):
+        #    for j in range(self.map_shape[1]):
+        #        if self.nav_map[i][j] == 1:
+        #            map_arr[i][j] = [0, 0, 0]
+        #self.map_arr = np.array(map_arr)
+        # self.apply_robot_radius_to_map()
 
     def screen_to_arr(self, coords):
         x, y = coords
@@ -143,10 +139,10 @@ class RRT_sim:
                 print("end point:", self.end_point)
 
     def draw_map(self):
-
-        map_img = pg.transform.scale(pg.surfarray.make_surface(self.map_arr),
-                                     (self.map_shape[0] * self.map_k, self.map_shape[1] * self.map_k))
-        self.screen.blit(map_img, (0, 0))
+        if self.map_arr.any():
+            map_img = pg.transform.scale(pg.surfarray.make_surface(self.slam.map()*255),
+                                         (self.map_shape[0] * self.map_k, self.map_shape[1] * self.map_k))
+            self.screen.blit(map_img, (0, 0))
         if self.start_point.any():
             pg.draw.circle(self.screen, (255, 0, 0), list(map(lambda x: x * self.map_k, self.start_point)), 5)
         if self.end_point.any():
@@ -160,8 +156,9 @@ class RRT_sim:
                           list(map(lambda x: x * self.map_k, self.end_point))[1] + 10], 5)
 
     def draw_curr_pos(self):
-        pg.draw.circle(self.screen, (255, 0, 102),
-                       list(map(lambda x: x * self.map_k, self.plotter.scale_to_arr(*self.plotter.pos[:-1]))), 10)
+        half = self.map_shape[0]//2
+        pg.draw.circle(self.screen, (0, 0, 102),
+                       list(map(lambda x: (half + x * self.discrete)*self.map_k, self.robot.increment_by_wheels[:2])), 10)
 
     def draw_nodes(self):
         for j in range(self.rrt.nodes.shape[0]):
@@ -200,11 +197,13 @@ class RRT_sim:
     def main_thr(self):
         while self.screen_obj.running:
             self.update_keys()
+            self.grab_map()
             self.draw_map()
             self.screen_obj.step()
+            self.draw_curr_pos()
             if not self.drive:
                 self.robot.going_to_target_pos = False
-            if self.rrt_state >= 0:
+            if self.rrt_state > 0:
                 self.draw_nodes()
                 self.draw_edges()
             if self.rrt_state == 2:
@@ -292,7 +291,7 @@ class RRT_sim:
         pg.quit()
 
 
-robot = KUKA('192.168.88.21', ros=False, offline=False, read_depth=False, camera_enable=False)
+robot = KUKA('192.168.88.21', ros=False, offline=False, read_depth=False, camera_enable=False, advanced=True)
 
-rrt_sim = RRT_sim(None, robot)
-rrt_sim.start()
+rrt_sim = RRT_sim(robot)
+rrt_sim.main_thr()

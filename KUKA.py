@@ -38,7 +38,7 @@ class KUKA:
     KUKA youbot controller
     """
 
-    def __init__(self, ip, /, ros=False, offline=False, read_depth=True, camera_enable=True):
+    def __init__(self, ip, /, ros=False, offline=False, read_depth=True, camera_enable=True, advanced=False):
         """
         Initializes robot KUKA youbot\n
         Establishes connection with depth and RGB video server\n
@@ -46,13 +46,18 @@ class KUKA:
         Starts sending commands thread\n
         Starts reading sensors data thread
         :param ip: robot ip
-        :param ros: automatically lunches youbot_tl_tests on KUKA if true
+        :param ros: force restart of youbot_tl_test on KUKA if true
         :param offline: toggles offline mode (doesn't try to connect to robot)
         :param read_depth: if false doesn't start depth client
         :param camera_enable: enables mjpeg client if True
+        :param advanced: disables all safety checks in the sake of time saving
         """
+        if advanced:
+            debug("WARNING!!! ADVANCED MODE ENABLED, ALL SAFETY CHECKS ARE SUSPENDED")
+
         self.ssh_client = paramiko.SSHClient()
-        self.operating = True
+        self.threads_number = 0
+        self.main_thr = thr.main_thread()
         self.camera_enable = camera_enable
         self.read_depth = read_depth
         self.ip = ip
@@ -91,19 +96,24 @@ class KUKA:
         self.increment_data_lidar = None  # the closest to lidar read increment value
         self.increment_data = None
         self.corr_arm_pos = [None, None]
+        self.wheels = None
+
+        # for position correction
+        self.wheels_old = None
+        self.calculation_pos = False
+        self.calculated_pos = [0, 0, 0]
+        self.calculated_pos_lidar = [0, 0, 0]
 
         if offline:
             self.connected = False
-            self.operating = False  # service variable to control threads
             return
 
         # connection
         debug(f"connecting to {ip}")
-        self.connected = True
 
         self.connected = True
-        self.operating = True
-        self.check_active_nodes_via_ssh(force_restart=ros)
+        if not advanced or ros:
+            self.check_active_nodes_via_ssh(force_restart=ros)
 
         if self.connected:
             debug("connecting to control channel")
@@ -113,20 +123,20 @@ class KUKA:
             self.conn.connect((self.ip, 7777))
             # init reading thread
             self.data_lock = thr.Lock()
-            self.send_lock = thr.Lock()
+            #self.send_lock = thr.Lock()
             self.data_thr = thr.Thread(target=self._receive_data, args=())
             self.send_thr = thr.Thread(target=self.send_data, args=())
             time.sleep(1)
             self.data_thr.start()
             self.send_thr.start()
+            self.threads_number += 2
             debug("connected to 7777 (data stream)")
 
         # connecting to video server
-        if self.connected:
-            if self.camera_enable:
-                if self.read_depth:
-                    self.init_depth_client()
-                self.init_rgb_client()
+        if self.connected and self.camera_enable:
+            if self.read_depth:
+                self.init_depth_client()
+            self.init_rgb_client()
 
         # waiting for initial arm position
         if self.connected:
@@ -151,6 +161,7 @@ class KUKA:
         self.client_rgb.start()
         self.cam_rgb_lock = thr.Lock()
         self.cam_rgb_thr = thr.Thread(target=self.get_frame_color, args=())
+        self.threads_number += 1
         self.cam_rgb_thr.start()
 
     def init_depth_client(self):
@@ -164,6 +175,7 @@ class KUKA:
         self.client_depth.start()
         self.cam_depth_lock = thr.Lock()
         self.cam_depth_thr = thr.Thread(target=self.get_frame_depth, args=())
+        self.threads_number += 1
         self.cam_depth_thr.start()
 
     def check_active_nodes_via_ssh(self, /, user='youbot', password='111111', force_restart=False):
@@ -174,6 +186,7 @@ class KUKA:
         :param password: 111111 by default
         """
         port = 22
+        rostopic = ''
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         if self.ip[-1] == "1":
@@ -190,7 +203,6 @@ class KUKA:
         except Exception as err:
             debug(err)
             self.connected = False
-            self.operating = False
             self.camera_enable = False
             self.read_depth = False
             return
@@ -200,38 +212,39 @@ class KUKA:
         ssh.send(b"sudo -s\n")
         time.sleep(0.1)
         ssh.send(password.encode("utf-8") + b"\n")
-        time.sleep(0.1)
-        msg = ssh.recv(10000).decode("utf-8")
-        while not msg.count("root@youbot:"):
-            msg += ssh.recv(1).decode("utf-8")
-        ssh.send(b"rostopic list\n")
-        time.sleep(2)
-        rostopic = ssh.recv(10000).decode("utf-8")
-        #print(rostopic)
-        while True:
-            if force_restart:
-                debug("ROS force restart")
-                force_restart = False
-            elif rostopic.count("ERROR: Unable"):
-                debug("ROS not running")
-            else:
-                break
+        if force_restart:
+            debug("ROS force restart")
             self.connect_ssh()
+        else:
+            time.sleep(0.1)
+            msg = ssh.recv(10000).decode("utf-8")
+            while not msg.count("root@youbot:"):
+                msg += ssh.recv(1).decode("utf-8")
             ssh.send(b"rostopic list\n")
-            time.sleep(2)
             rostopic = ssh.recv(10000).decode("utf-8")
-        if rostopic.count("camera/rgb/image_raw"):
-            self.camera_enable = True
-            debug("RGB camera is active")
-        else:
-            debug("WARN: RGB camera is inactive")
-            self.camera_enable = False
-        if rostopic.count("camera/depth/image"):
-            self.read_depth = True
-            debug("depth camera is active")
-        else:
-            debug("WARN: depth camera is inactive")
-            self.read_depth = False
+            while not rostopic.count("root@youbot:"):
+                rostopic += ssh.recv(1).decode("utf-8")
+            if rostopic.count("ERROR: Unable"):
+                debug("ROS not running")
+                rostopic = ''
+                self.connect_ssh()
+
+        if rostopic == '':
+            ssh.send(b"rostopic list\n")
+        while not rostopic.count("root@youbot:"):
+            rostopic += ssh.recv(1).decode("utf-8")
+        if self.camera_enable:
+            if rostopic.count("camera/rgb/image_raw"):
+                debug("RGB camera is active")
+            else:
+                debug("WARN: RGB camera is inactive")
+                self.camera_enable = False
+            if self.read_depth:
+                if rostopic.count("camera/depth/image"):
+                    debug("depth camera is active")
+                else:
+                    debug("WARN: depth camera is inactive")
+                    self.read_depth = False
 
     def connect_ssh(self, /, user='youbot', password='111111'):
         """
@@ -256,7 +269,6 @@ class KUKA:
         except Exception as err:
             debug(err)
             self.connected = False
-            self.operating = False
             return
         ssh = self.ssh_client.invoke_shell()
         time.sleep(0.5)
@@ -299,9 +311,9 @@ class KUKA:
         :param data: message contents
         """
         if self.connected:
-            self.send_lock.acquire()
+            #self.send_lock.acquire()
             self.send_queue[ind] = data
-            self.send_lock.release()
+            #self.send_lock.release()
         else:
             self.send_queue[ind] = data
 
@@ -311,24 +323,63 @@ class KUKA:
         """
 
         send_ind = 0
-        while self.operating:
-
+        while self.main_thr.is_alive():
             to_send = None
-            while not to_send and self.operating:
-                self.send_lock.acquire()
+            while not to_send and self.main_thr.is_alive():
+                #self.send_lock.acquire()
                 to_send = self.send_queue[send_ind]
                 self.send_queue[send_ind] = None
-                self.send_lock.release()
+                #self.send_lock.release()
                 send_ind += 1
                 self.send_time = time.time_ns()
                 if send_ind == 3:
                     send_ind = 0
                 time.sleep(1 / self.frequency)
             if self.connected:
-                self.conn.send(to_send)
+                try:
+                    if to_send:
+                        self.conn.send(to_send)
+                except BrokenPipeError:
+                    debug("send_data thread died due to broken pipe")
+                    break
+
             else:
                 debug(f"message:{to_send}")
                 pass
+
+        self.threads_number -= 1
+        debug(f"send_data thread terminated, {self.threads_number} threads remain")
+
+
+    def wheelPositionsToCartesianPosition(self):
+        '''
+        Converts wheels transition to cartesian position
+        :return: None
+        '''
+        if self.wheels and not self.wheels_old:
+            self.wheels_old = self.wheels
+        elif not self.wheels:
+            return
+
+        last_wheel_positions = self.wheels_old
+        wheel_positions = self.wheels
+
+        wheel_radius_per4 = 0.0475 / 4.0
+
+        geom_factor = (0.47 / 2.0) + (0.3 / 2.0)
+
+        delta_positionW1 = (wheel_positions[0] - last_wheel_positions[0])
+        delta_positionW2 = (wheel_positions[1] - last_wheel_positions[1])
+        delta_positionW3 = (wheel_positions[2] - last_wheel_positions[2])
+        delta_positionW4 = (wheel_positions[3] - last_wheel_positions[3])
+        deltaLongitudinalPos = (delta_positionW1 + delta_positionW2 + delta_positionW3 + delta_positionW4) * wheel_radius_per4
+        deltaTransversalPos = (-delta_positionW1 + delta_positionW2 + delta_positionW3 - delta_positionW4) * wheel_radius_per4
+        self.calculated_pos[2] -= (-delta_positionW1 + delta_positionW2 - delta_positionW3 + delta_positionW4) * (wheel_radius_per4 / geom_factor)
+
+        self.calculated_pos[0] += deltaLongitudinalPos * math.cos(self.calculated_pos[2]) - deltaTransversalPos * math.sin(self.calculated_pos[2])
+        self.calculated_pos[1] += deltaLongitudinalPos * math.sin(self.calculated_pos[2]) - deltaTransversalPos * math.cos(self.calculated_pos[2])
+
+        self.wheels_old = self.wheels[:]
 
     def _parse_data(self, data):
         """
@@ -341,6 +392,7 @@ class KUKA:
         write_increment = None
         write_arm1 = None
         write_arm2 = None
+        wheels = None
         if data[:7] == ".laser#":
             raw = list(data[7:].split(';'))
             if len(raw) < 200:
@@ -370,17 +422,26 @@ class KUKA:
                 write_arm2 = list(map(float, data[8:].split(';')))
             except:
                 write_arm2 = None
+        elif data[:8] == ".wheels#":
+            try:
+                wheels = list(map(float, data[8:].split(';')))
+            except:
+                wheels = None
         # update data
-        if write_lidar or write_increment or write_arm1 or write_arm2:
+        if write_lidar or write_increment or write_arm1 or write_arm2 or wheels:
 
             self.data_lock.acquire()
             if write_lidar:
                 self.lidar_data = write_lidar
                 self.increment_data_lidar = self.increment_data
+                self.calculated_pos_lidar = self.calculated_pos[:]
             if write_increment:
                 self.increment_data = write_increment
+            if wheels:
+                self.wheels = wheels
+
             if write_arm1:
-                arm_ID = 0  # затычка
+                #arm_ID = 0  # затычка
                 m1 = -write_arm1[0] + 168
                 m2 = -write_arm1[1] + 66
                 m3 = -write_arm1[2] - 150
@@ -388,7 +449,7 @@ class KUKA:
                 m5 = write_arm1[4] - 166
                 self.corr_arm_pos[0] = [m1, m2, m3, m4, m5]
             if write_arm2:
-                arm_ID = 0  # затычка
+                #arm_ID = 0  # затычка
                 m1 = -write_arm2[0] + 168
                 m2 = -write_arm2[1] + 66
                 m3 = -write_arm2[2] - 150
@@ -396,6 +457,14 @@ class KUKA:
                 m5 = write_arm2[4] - 166
                 self.corr_arm_pos[1] = [m1, m2, m3, m4, m5]
             self.data_lock.release()
+            if wheels and not self.calculation_pos:
+                self.calculation_pos = True
+                self.wheelPositionsToCartesianPosition()
+                self.calculation_pos = False
+
+
+
+
 
     def _receive_data(self):
         """
@@ -404,19 +473,20 @@ class KUKA:
 
         data_buff_len = 0
         self.data_buff = b''
-        while self.operating:
+        while self.main_thr.is_alive():
             if data_buff_len > 5000:
                 self.data_buff = b''
                 data_buff_len = 0
             try:
                 el = self.conn.recv(1)
             except TimeoutError:
-                print("_receive_data thread died due to timeout")
+                debug("_receive_data thread died due to timeout")
+                break
 
             if el != b'':
                 self.data_buff += el
                 data_buff_len += 1
-            if len(self.data_buff) > 0 and self.data_buff[-1] == 13:
+            if data_buff_len > 0 and self.data_buff[-1] == 13:
                 self.conn.recv(1)
 
                 try:
@@ -426,8 +496,12 @@ class KUKA:
                 except:
                     pass
                 self.data_buff = b''
+                data_buff_len = 0
+        self.threads_number -= 1
+        debug(f"_receive_data thread terminated, {self.threads_number} threads remain")
 
     # get functions
+
     @property
     def lidar(self):
         """
@@ -438,7 +512,7 @@ class KUKA:
         if self.connected:
             self.data_lock.acquire()
             out = self.lidar_data
-            inc = self.increment_data_lidar
+            inc = self.calculated_pos_lidar
             self.data_lock.release()
             return inc, out
         else:
@@ -459,6 +533,21 @@ class KUKA:
             return out
         else:
             return None, None, None, None, None
+
+    @property
+    def increment_by_wheels(self):
+        """
+        Acquires variable data lock and reads increment values
+
+        :return: increment values
+        """
+        if self.connected:
+            self.data_lock.acquire()
+            out = self.calculated_pos[:]
+            self.data_lock.release()
+            return out
+        else:
+            return None
 
     @property
     def increment(self):
@@ -534,7 +623,7 @@ class KUKA:
         self.move_speed = (f, s, r)
 
     # go to set coordinates
-    def go_to(self, x, y, ang=0, /, prec=0.005, k=1, initial_speed = None):
+    def go_to(self, x, y, ang=0, /, prec=0.005, k=1, initial_speed=None):
         """
         Sends robot to given coordinates
         :param x: x position in relative coordinates
@@ -543,7 +632,7 @@ class KUKA:
         """
         if not initial_speed:
             initial_speed = self.move_to_target_max_speed
-        if self.operating:
+        if self.main_thr.is_alive():
             if self.going_to_target_pos:
                 self.body_target_pos_lock.acquire()
                 self.body_target_pos = [x, y, ang]
@@ -553,6 +642,7 @@ class KUKA:
                 self.going_to_target_pos = True
                 self.body_target_pos = [x, y, ang]
                 self.go_to_tr = thr.Thread(target=self.move_base_to_pos, args=([prec, k, initial_speed]))
+                self.threads_number += 1
                 self.go_to_tr.start()
 
     def move_base_to_pos(self, prec=0.005, k=None, initial_speed=0):
@@ -561,7 +651,7 @@ class KUKA:
         """
         if not k:
             k = self.move_to_target_k
-        while self.operating and self.going_to_target_pos:
+        while self.main_thr.is_alive() and self.going_to_target_pos:
             self.body_target_pos_lock.acquire()
             x, y, ang = self.body_target_pos
             self.body_target_pos_lock.release()
@@ -573,7 +663,7 @@ class KUKA:
             speed = min(initial_speed, dist * k)
             targ_ang = math.atan2(loc_y, loc_x)
             loc_ang = targ_ang - rob_ang
-            if dist < prec and (ang - rob_ang) < prec/100:
+            if dist < prec and (ang - rob_ang) < prec / 100:
                 break
             fov_speed = speed * math.cos(loc_ang)
             side_speed = -speed * math.sin(loc_ang)
@@ -585,6 +675,8 @@ class KUKA:
         time.sleep(0.01)
         self.move_base(0, 0, 0)
         self.going_to_target_pos = False
+        self.threads_number -= 1
+        debug(f"move_base_to_pos thread terminated, {self.threads_number} threads remain")
 
     # move arm forward or inverse kinetic
     def move_arm(self, *args, **kwargs):
@@ -705,13 +797,11 @@ class KUKA:
                 elif -84 < m2_ang_neg < 63 and -135 < m3_ang_neg < 110 and -90 < m4_ang_neg < 95:
                     return m2_ang_neg, m3_ang_neg, m4_ang_neg, True
                 else:
-                    print("no")
                     return *self.arm_pos[self.arm_ID][1:4], False
                 # m2_ang = range_cut(-84, 63, m2_ang)
                 # m3_ang = range_cut(-135, 110, m3_ang)
                 # m4_ang = range_cut(-120, 90, m4_ang)
             except:
-                print("no")
                 # debug("math error, out of range")
                 return *self.arm_pos[self.arm_ID][1:4], False
         else:  # (not tested, probably not working)
@@ -742,7 +832,7 @@ class KUKA:
         """
         Reads from color video server and writes to RGB and BGR camera variables (thread)
         """
-        while self.operating:
+        while self.main_thr.is_alive():
             try:
                 buf_rgb = self.client_rgb.dequeue_buffer()
                 image = Image.open(io.BytesIO(buf_rgb.data))
@@ -758,13 +848,15 @@ class KUKA:
             except Exception as err:
                 debug(err)
                 return
+        self.threads_number -= 1
+        debug(f"get_frame_color thread terminated, {self.threads_number} threads remain")
 
     def get_frame_depth(self):
         """
         Reads from depth video server and writes to depth camera variable (thread)
         """
         try:
-            while self.operating:
+            while self.main_thr.is_alive():
                 buf_depth = self.client_depth.dequeue_buffer()
                 image_depth = np.array(Image.open(io.BytesIO(buf_depth.data)))
                 # image_depth = cv2.cvtColor(np.array(image_depth), cv2.COLOR_BGR2GRAY)
@@ -775,6 +867,8 @@ class KUKA:
                 self.cam_depth_lock.release()
         except Exception as err:
             debug(err)
+        self.threads_number -= 1
+        debug(f"get_frame_depth thread terminated, {self.threads_number} threads remain")
         return
 
     def __del__(self):
@@ -789,7 +883,6 @@ class KUKA:
         Moves arm to folded position\n
         Disconnects from robot
         """
-        self.operating = False
         if self.connected:
             self.connected = False
             self.move_base()
@@ -797,4 +890,4 @@ class KUKA:
             time.sleep(1)
             self.conn.shutdown(socket.SHUT_RDWR)
             self.conn.close()
-            debug("disconnected")
+            debug(f"robot {self.ip} disconnected")

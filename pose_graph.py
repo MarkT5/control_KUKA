@@ -99,12 +99,8 @@ class PoseGrah:
     def __len__(self):
         return self.node_num
 
-    def get_converted_object(self, id, odom=np.array(False)):
-        if id < 0:
-            id += self.node_num
-        if not odom.any():
-            odom = self.pos[id]
-        return self.objects[id].split_objects(odom)
+    def update(self, ind):
+        self.objects[ind].update(self.pos[ind])
 
     def check_attribute(self, key):
         if isinstance(key, int):

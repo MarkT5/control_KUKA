@@ -51,5 +51,3 @@ def pos_vector_from_homogen_matrix(mat):
     rot = math.atan2(mat[1, 0], mat[0, 0])
     return np.array([*mat[:2, 2], rot])
 
-
-print(pos_vector_from_homogen_matrix(homogen_matrix_from_pos([1, 4, -3.1416], False)))
