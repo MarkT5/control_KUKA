@@ -367,6 +367,7 @@ class KUKA:
         wheel_radius_per4 = 0.0475 / 4.0
 
         geom_factor = (0.47 / 2.0) + (0.3 / 2.0)
+        ang = self.calculated_pos[2]
 
         delta_positionW1 = (wheel_positions[0] - last_wheel_positions[0])
         delta_positionW2 = (wheel_positions[1] - last_wheel_positions[1])
@@ -374,10 +375,13 @@ class KUKA:
         delta_positionW4 = (wheel_positions[3] - last_wheel_positions[3])
         deltaLongitudinalPos = (delta_positionW1 + delta_positionW2 + delta_positionW3 + delta_positionW4) * wheel_radius_per4
         deltaTransversalPos = (-delta_positionW1 + delta_positionW2 + delta_positionW3 - delta_positionW4) * wheel_radius_per4
-        self.calculated_pos[2] -= (-delta_positionW1 + delta_positionW2 - delta_positionW3 + delta_positionW4) * (wheel_radius_per4 / geom_factor)
+        ang -= (-delta_positionW1 + delta_positionW2 - delta_positionW3 + delta_positionW4) * (wheel_radius_per4 / geom_factor)
 
-        self.calculated_pos[0] += deltaLongitudinalPos * math.cos(self.calculated_pos[2]) - deltaTransversalPos * math.sin(self.calculated_pos[2])
-        self.calculated_pos[1] += deltaLongitudinalPos * math.sin(self.calculated_pos[2]) - deltaTransversalPos * math.cos(self.calculated_pos[2])
+        ang = (abs(ang + 2 * math.pi)) % (2*math.pi)
+
+        self.calculated_pos[0] += deltaLongitudinalPos * math.cos(ang) + deltaTransversalPos * math.sin(ang)
+        self.calculated_pos[1] += deltaLongitudinalPos * math.sin(ang) - deltaTransversalPos * math.cos(ang)
+        self.calculated_pos[2] = ang
 
         self.wheels_old = self.wheels[:]
 
