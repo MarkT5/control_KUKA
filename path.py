@@ -12,7 +12,7 @@ class RRT_sim:
         self.robot_radius = 17
         self.screen_obj = Screen(self.screen_size, self.screen_size)
         self.screen = self.screen_obj.screen
-        self.move_speed_val = 0.5
+        self.move_speed_val = 1
         self.last_checked_pressed_keys = []
         self.step = False
         self.flow = False
@@ -22,12 +22,12 @@ class RRT_sim:
         self.start_point = np.array(False)
         self.nav_map = np.array(False)
         self.map_arr = np.array(False)
-        #self.manual_map()
+        # self.manual_map()
 
         self.rrt_state = 0
         self.slam = SLAM(self.robot)
         self.slam_thr = thr.Thread(target=self.slam.run, args=())
-        self.slam_thr.start()
+        #self.slam_thr.start()
 
     # make map
     def manual_map(self):
@@ -60,21 +60,21 @@ class RRT_sim:
         return [x * self.discrete, y * self.discrete]
 
     def grab_map(self):
-        #try:
+        # try:
         #    del self.rrt
-        #except:
+        # except:
         #    pass
         self.nav_map = self.slam.bool_map
-        self.map_arr = self.slam.bool_map*255
+        self.map_arr = self.slam.bool_map * 255
         self.map_shape = self.nav_map.shape
         self.map_k = self.screen_size / max(self.map_shape[0], self.map_shape[1])
-        #self.start_point = np.array(self.slam.corr_pos)
-        #map_arr = [[[255, 255, 255]] * self.map_shape[0]] * self.map_shape[1]
-        #for i in range(self.map_shape[0]):
+        # self.start_point = np.array(self.slam.corr_pos)
+        # map_arr = [[[255, 255, 255]] * self.map_shape[0]] * self.map_shape[1]
+        # for i in range(self.map_shape[0]):
         #    for j in range(self.map_shape[1]):
         #        if self.nav_map[i][j] == 1:
         #            map_arr[i][j] = [0, 0, 0]
-        #self.map_arr = np.array(map_arr)
+        # self.map_arr = np.array(map_arr)
         # self.apply_robot_radius_to_map()
 
     def screen_to_arr(self, coords):
@@ -140,7 +140,7 @@ class RRT_sim:
 
     def draw_map(self):
         if self.map_arr.any():
-            map_img = pg.transform.scale(pg.surfarray.make_surface(self.slam.map()*255),
+            map_img = pg.transform.scale(pg.surfarray.make_surface(self.slam.map() * 255),
                                          (self.map_shape[0] * self.map_k, self.map_shape[1] * self.map_k))
             self.screen.blit(map_img, (0, 0))
         if self.start_point.any():
@@ -156,9 +156,10 @@ class RRT_sim:
                           list(map(lambda x: x * self.map_k, self.end_point))[1] + 10], 5)
 
     def draw_curr_pos(self):
-        half = self.map_shape[0]//2
-        pg.draw.circle(self.screen, (0, 0, 102),
-                       list(map(lambda x: (half + x * self.discrete)*self.map_k, self.robot.increment_by_wheels[:2])), 10)
+        if self.robot.increment_by_wheels:
+            half = self.map_shape[0] // 2
+            pg.draw.circle(self.screen, (0, 0, 102), list(
+                map(lambda x: (half + x * self.discrete) * self.map_k, self.robot.increment_by_wheels[:2])), 10)
 
     def draw_nodes(self):
         for j in range(self.rrt.nodes.shape[0]):
@@ -199,8 +200,9 @@ class RRT_sim:
             self.update_keys()
             self.grab_map()
             self.draw_map()
-            self.screen_obj.step()
             self.draw_curr_pos()
+            self.screen_obj.step()
+
             if not self.drive:
                 self.robot.going_to_target_pos = False
             if self.rrt_state > 0:
@@ -209,7 +211,6 @@ class RRT_sim:
             if self.rrt_state == 2:
                 self.rrt.get_path()
                 self.draw_path()
-                self.draw_curr_pos()
             self.screen_obj.step()
         self.screen_obj.end()
 
@@ -291,7 +292,8 @@ class RRT_sim:
         pg.quit()
 
 
-robot = KUKA('192.168.88.21', ros=False, offline=False, read_depth=False, camera_enable=False, advanced=True)
-
+robot = KUKA('192.168.88.21', ros=False, offline=False, read_depth=False, camera_enable=False, advanced=True,
+             log=("log/log5.txt", 10))
+#log=("log/log3.txt", 10)
 rrt_sim = RRT_sim(robot)
 rrt_sim.main_thr()

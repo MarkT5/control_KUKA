@@ -155,7 +155,7 @@ class PoseGrah:
             self.pos = np.append(self.pos, [pos], axis=0)
         self.node_num += 1
 
-    def add_edge(self, parent_id, to_n, child_id, cov=np.array([[0.001, 0, 0], [0, 0.001, 0], [0, 0, 0.001]])):
+    def add_edge(self, parent_id, to_n, child_id, cov=np.array([[0.1, 0, 0], [0, 0.1, 0], [0, 0, 0.1]])):
         parent_id = int(parent_id)
         child_id = int(child_id)
         if child_id < 0:
