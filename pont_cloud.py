@@ -6,13 +6,14 @@ from import_libs import *
 class PointCloud:
     def __init__(self, data):
         self.odom, self.lidar = data
-        self.xy_form = []
+        self.xy_form = np.array(False)
         self.xy_local_form = []
         self.gaps = [0]
         self.object_sizes = [[0, 0]]
         self.split_objects()
         self.xy_local_to_global()
         self.peaks = []
+        #self.object_weight_vector = [self.gaps[0]]
         self.peak_coords = [None, np.array([False])]
         for i in range(len(self.gaps) - 1, 0, -1):
             dp_out = [*self.douglas_peucker(self.gaps[i - 1], self.gaps[i])]
@@ -28,13 +29,16 @@ class PointCloud:
     def update(self, new_odom):
         self.odom = new_odom
         self.xy_local_to_global()
-        self.peak_coords = [[0], np.array([self.xy_form[self.peaks[0][0][1]]])]
-        for i in range(1, len(self.peaks)):
-            self.peak_coords[0].append(i)
-            self.peak_coords[1] = np.append(self.peak_coords[1], [self.xy_form[self.peaks[i][0][1]]], axis=0)
+        if self.peaks:
+            self.peak_coords = [[0], np.array([self.xy_form[self.peaks[0][0][1]]])]
+            for i in range(1, len(self.peaks)):
+                self.peak_coords[0].append(i)
+                self.peak_coords[1] = np.append(self.peak_coords[1], [self.xy_form[self.peaks[i][0][1]]], axis=0)
 
     def icp(self, other):  # icp
-        if self.peak_coords[1].any() and other.peak_coords[1].any():
+
+
+        '''if self.peak_coords[1].any() and other.peak_coords[1].any():
             neighbours = np.array([*self.nearest_neighbor([self.peak_coords[1]], other.peak_coords[1]),
                                    range(len(self.peak_coords[1]))]).T
             neighbours = sorted(neighbours, key=lambda x: x[0])
@@ -92,7 +96,8 @@ class PointCloud:
                     pyplot.show()
                 return icp_out
 
-        return np.array([[1, 0, 1e15], [0, 1, 1e15], [0, 0, 1]]), None, 0, 1e15
+        return np.array([[1, 0, 1e15], [0, 1, 1e15], [0, 0, 1]]), None, 0, 1e15'''
+        return self._icp(self.xy_form, other.xy_form)
 
     def get_obj(self, ind):
         ind = int(ind)
@@ -141,7 +146,7 @@ class PointCloud:
         converted = np.dot(homogen_matrix_from_pos(self.odom, True), converted)
         # back from homogeneous to cartesian
         converted = np.array(converted[:converted.shape[1], :]).T
-        self.xy_form = converted[:, :2]
+        self.xy_form = np.array(converted[:, :2])
 
     def generate_weight_vector(self, src):
         ind = src[0]
@@ -341,7 +346,7 @@ class PointCloud:
         dist, indexes = A_tree.query(src)
         return dist.ravel(), indexes.ravel()
 
-    def _icp(self, A, B, init_pose=None, max_iterations=20, tolerance=0.0001, /, weight_vector=None):
+    def _icp(self, A, B, init_pose=None, max_iterations=10, tolerance=0.01, /, weight_vector=None):
         # print(A.shape, B.shape)
         # assert A.shape == B.shape
         # get number of dimensions
