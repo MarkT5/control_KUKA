@@ -38,7 +38,14 @@ class KUKA:
     KUKA youbot controller
     """
 
-    def __init__(self, ip, /, ros=False, offline=False, read_depth=True, camera_enable=True, advanced=False):
+    def __init__(self, ip, /,
+                 ros=False,
+                 offline=False,
+                 read_depth=True,
+                 camera_enable=True,
+                 advanced=False,
+                 log=None,
+                 read_from_log=None):
         """
         Initializes robot KUKA youbot\n
         Establishes connection with depth and RGB video server\n
@@ -51,6 +58,8 @@ class KUKA:
         :param read_depth: if false doesn't start depth client
         :param camera_enable: enables mjpeg client if True
         :param advanced: disables all safety checks in the sake of time saving
+        :param log: if [path, freq] logs odometry and lidar data to set path with set frequency
+        :param read_from_log: if [path, freq] streams odometry and lidar data from set log path with set frequency
         """
         if advanced:
             debug("WARNING!!! ADVANCED MODE ENABLED, ALL SAFETY CHECKS ARE SUSPENDED")
@@ -62,6 +71,8 @@ class KUKA:
         self.read_depth = read_depth
         self.ip = ip
         self.frequency = 50  # operating frequency
+        self.data_lock = thr.Lock()
+        self.connected = True
 
         # data from this variable one by one to avoid data loss (order: base, arm, grip)
         self.send_queue = [None, None, None]
@@ -96,7 +107,8 @@ class KUKA:
         self.increment_data_lidar = None  # the closest to lidar read increment value
         self.increment_data = None
         self.corr_arm_pos = [None, None]
-        self.wheels = None
+        self.wheels_data = None
+        self.wheels_data_lidar = None
 
         # for position correction
         self.wheels_old = None
@@ -104,6 +116,11 @@ class KUKA:
         self.calculated_pos = [0, 0, 0]
         self.calculated_pos_lidar = [0, 0, 0]
 
+        if read_from_log:
+            self.connected = False
+            self.log_stream_thr = thr.Thread(target=self.stream_from_log, args=read_from_log)
+            self.log_stream_thr.start()
+            return
         if offline:
             self.connected = False
             return
@@ -111,7 +128,7 @@ class KUKA:
         # connection
         debug(f"connecting to {ip}")
 
-        self.connected = True
+
         if not advanced or ros:
             self.check_active_nodes_via_ssh(force_restart=ros)
 
@@ -122,8 +139,6 @@ class KUKA:
             self.conn.settimeout(2)
             self.conn.connect((self.ip, 7777))
             # init reading thread
-            self.data_lock = thr.Lock()
-            #self.send_lock = thr.Lock()
             self.data_thr = thr.Thread(target=self._receive_data, args=())
             self.send_thr = thr.Thread(target=self.send_data, args=())
             time.sleep(1)
@@ -147,6 +162,9 @@ class KUKA:
             # раскомментить, для ожтдания данных с руки
             # while not self.corr_arm_pos:
             #    time.sleep(0.1)
+        if log:
+            self.logger_thr = thr.Thread(target=self.logger, args=log)
+            self.logger_thr.start()
 
     def init_rgb_client(self):
         """
@@ -311,9 +329,9 @@ class KUKA:
         :param data: message contents
         """
         if self.connected:
-            #self.send_lock.acquire()
+            # self.send_lock.acquire()
             self.send_queue[ind] = data
-            #self.send_lock.release()
+            # self.send_lock.release()
         else:
             self.send_queue[ind] = data
 
@@ -326,10 +344,10 @@ class KUKA:
         while self.main_thr.is_alive():
             to_send = None
             while not to_send and self.main_thr.is_alive():
-                #self.send_lock.acquire()
+                # self.send_lock.acquire()
                 to_send = self.send_queue[send_ind]
                 self.send_queue[send_ind] = None
-                #self.send_lock.release()
+                # self.send_lock.release()
                 send_ind += 1
                 self.send_time = time.time_ns()
                 if send_ind == 3:
@@ -350,19 +368,19 @@ class KUKA:
         self.threads_number -= 1
         debug(f"send_data thread terminated, {self.threads_number} threads remain")
 
-
     def wheelPositionsToCartesianPosition(self):
         '''
         Converts wheels transition to cartesian position
         :return: None
         '''
-        if self.wheels and not self.wheels_old:
-            self.wheels_old = self.wheels
-        elif not self.wheels:
+        wheels = self.wheels
+        if wheels and not self.wheels_old:
+            self.wheels_old = wheels
+        elif not wheels:
             return
 
         last_wheel_positions = self.wheels_old
-        wheel_positions = self.wheels
+        wheel_positions = wheels
 
         wheel_radius_per4 = 0.0475 / 4.0
 
@@ -373,17 +391,20 @@ class KUKA:
         delta_positionW2 = (wheel_positions[1] - last_wheel_positions[1])
         delta_positionW3 = (wheel_positions[2] - last_wheel_positions[2])
         delta_positionW4 = (wheel_positions[3] - last_wheel_positions[3])
-        deltaLongitudinalPos = (delta_positionW1 + delta_positionW2 + delta_positionW3 + delta_positionW4) * wheel_radius_per4
-        deltaTransversalPos = (-delta_positionW1 + delta_positionW2 + delta_positionW3 - delta_positionW4) * wheel_radius_per4
-        ang -= (-delta_positionW1 + delta_positionW2 - delta_positionW3 + delta_positionW4) * (wheel_radius_per4 / geom_factor)
+        deltaLongitudinalPos = (
+                                           delta_positionW1 + delta_positionW2 + delta_positionW3 + delta_positionW4) * wheel_radius_per4
+        deltaTransversalPos = (
+                                          -delta_positionW1 + delta_positionW2 + delta_positionW3 - delta_positionW4) * wheel_radius_per4
+        ang -= (-delta_positionW1 + delta_positionW2 - delta_positionW3 + delta_positionW4) * (
+                    wheel_radius_per4 / geom_factor)
 
-        ang = (abs(ang + 2 * math.pi)) % (2*math.pi)
+        ang = (abs(ang + 2 * math.pi)) % (2 * math.pi)
 
         self.calculated_pos[0] += deltaLongitudinalPos * math.cos(ang) + deltaTransversalPos * math.sin(ang)
         self.calculated_pos[1] += deltaLongitudinalPos * math.sin(ang) - deltaTransversalPos * math.cos(ang)
         self.calculated_pos[2] = ang
 
-        self.wheels_old = self.wheels[:]
+        self.wheels_old = wheels
 
     def _parse_data(self, data):
         """
@@ -439,13 +460,14 @@ class KUKA:
                 self.lidar_data = write_lidar
                 self.increment_data_lidar = self.increment_data
                 self.calculated_pos_lidar = self.calculated_pos[:]
+                self.wheels_data_lidar = self.wheels_data
             if write_increment:
                 self.increment_data = write_increment
             if wheels:
-                self.wheels = wheels
+                self.wheels_data = wheels
 
             if write_arm1:
-                #arm_ID = 0  # затычка
+                # arm_ID = 0  # затычка
                 m1 = -write_arm1[0] + 168
                 m2 = -write_arm1[1] + 66
                 m3 = -write_arm1[2] - 150
@@ -453,7 +475,7 @@ class KUKA:
                 m5 = write_arm1[4] - 166
                 self.corr_arm_pos[0] = [m1, m2, m3, m4, m5]
             if write_arm2:
-                #arm_ID = 0  # затычка
+                # arm_ID = 0  # затычка
                 m1 = -write_arm2[0] + 168
                 m2 = -write_arm2[1] + 66
                 m3 = -write_arm2[2] - 150
@@ -465,10 +487,6 @@ class KUKA:
                 self.calculation_pos = True
                 self.wheelPositionsToCartesianPosition()
                 self.calculation_pos = False
-
-
-
-
 
     def _receive_data(self):
         """
@@ -504,6 +522,59 @@ class KUKA:
         self.threads_number -= 1
         debug(f"_receive_data thread terminated, {self.threads_number} threads remain")
 
+    def logger(self, path, freq):
+        '''
+        Logs odometry and lidar data to path with set frequency
+        :param path: name and path to log file
+        :param freq: logging frequency
+        :return: None
+        '''
+        self.threads_number += 1
+        while not (self.wheels_data_lidar and self.lidar):
+            time.sleep(0.2)
+        debug(f"writing log to {path} with 1/{freq}Hz")
+        self.log_file = open(path, "a")
+        while self.main_thr.is_alive():
+            self.log_file.write(", ".join(map(str, self.wheels_data_lidar)) + "; " + ", ".join(map(str, self.lidar[-1])) + "\n")
+            time.sleep(1 / freq)
+        self.log_file.close()
+        self.threads_number -= 1
+        debug(f"logger thread terminated, {self.threads_number} threads remain")
+
+    def stream_from_log(self, path, freq):
+        '''
+        streams odometry and lidar data from path with set frequency
+        :param path: name and path to log file
+        :param freq: logging frequency
+        :return: None
+        '''
+        self.threads_number += 1
+        debug(f"streaming log from {path} with 1/{freq}Hz")
+        log_file = open(path, "r")
+        log_data = []
+        for i in log_file:
+            sp_log_data = i.split(';')
+            if sp_log_data[-1] == '':
+                break
+            odom = sp_log_data[0].split(',')
+            lidar = sp_log_data[1].split(',')
+            odom = list(map(float, odom))
+            lidar = list(map(float, lidar))
+            log_data.append([odom, lidar])
+        self.log_data = log_data[:]
+        i = 0
+        while self.main_thr.is_alive() and i < len(self.log_data):
+            self.data_lock.acquire()
+            self.wheels_data, self.lidar_data = self.log_data[i]
+            self.wheels_data_lidar = self.wheels_data
+            i += 1
+            self.data_lock.release()
+            self.wheelPositionsToCartesianPosition()
+            time.sleep(1 / freq)
+        log_file.close()
+        self.threads_number -= 1
+        debug(f"logger thread terminated, {self.threads_number} threads remain")
+
     # get functions
 
     @property
@@ -513,14 +584,11 @@ class KUKA:
 
         :return: lidar data
         """
-        if self.connected:
-            self.data_lock.acquire()
-            out = self.lidar_data
-            inc = self.calculated_pos_lidar
-            self.data_lock.release()
-            return inc, out
-        else:
-            return None, None
+        self.data_lock.acquire()
+        out = self.lidar_data
+        inc = self.calculated_pos_lidar
+        self.data_lock.release()
+        return inc, out
 
     @property
     def arm(self, /, arm_ID=0):
@@ -545,13 +613,23 @@ class KUKA:
 
         :return: increment values
         """
-        if self.connected:
-            self.data_lock.acquire()
-            out = self.calculated_pos[:]
-            self.data_lock.release()
-            return out
-        else:
-            return None
+        self.data_lock.acquire()
+        out = self.calculated_pos[:]
+        self.data_lock.release()
+        return out
+
+    @property
+    def wheels(self):
+        """
+        Acquires variable data lock and reads increment values
+
+        :return: increment values
+        """
+        self.data_lock.acquire()
+        out = self.wheels_data[:]
+        self.data_lock.release()
+        return out
+
 
     @property
     def increment(self):
